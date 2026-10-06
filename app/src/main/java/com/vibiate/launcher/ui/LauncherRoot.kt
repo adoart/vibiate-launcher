@@ -1,0 +1,382 @@
+package com.vibiate.launcher.ui
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.vibiate.launcher.R
+import com.vibiate.launcher.data.AppEntry
+import com.vibiate.launcher.data.AppRepository
+import com.vibiate.launcher.data.DockRepository
+import com.vibiate.launcher.data.IconPackManager
+import com.vibiate.launcher.data.IconPackTheme
+import com.vibiate.launcher.data.LauncherFont
+import com.vibiate.launcher.data.SettingsRepository
+import com.vibiate.launcher.data.ThemeMode
+import com.vibiate.launcher.data.WallpaperRotator
+import com.vibiate.launcher.ui.components.LauncherDock
+import com.vibiate.launcher.ui.components.LauncherTab
+import com.vibiate.launcher.ui.components.LauncherTopBar
+import com.vibiate.launcher.ui.components.toImageBitmap
+import com.vibiate.launcher.ui.drag.DragDropState
+import com.vibiate.launcher.ui.drag.DragPayload
+import com.vibiate.launcher.ui.drag.LocalDragDrop
+import com.vibiate.launcher.ui.theme.LocalIsDark
+import com.vibiate.launcher.ui.theme.VibiateTheme
+import com.vibiate.launcher.widget.WidgetController
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
+
+@Composable
+fun LauncherRoot(
+    appRepository: AppRepository,
+    settings: SettingsRepository,
+    iconPackManager: IconPackManager,
+    widgetController: WidgetController,
+    wallpaperRotator: WallpaperRotator,
+    dockRepository: DockRepository,
+    /** Emits when HOME is pressed while the launcher is in front. */
+    homeEvents: Flow<Unit>,
+    /** Start the widget pick flow for the given screen id (0 = built-in Widgets). */
+    onAddWidget: (Int) -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val themeMode by settings.themeMode.collectAsState(initial = ThemeMode.DARK)
+    val iconPackPkg by settings.iconPackPackage.collectAsState(initial = "")
+    val gridSize by settings.gridSize.collectAsState(
+        initial = SettingsRepository.DEFAULT_GRID_SIZE
+    )
+    val fontFamily by settings.fontFamily.collectAsState(initial = LauncherFont.SYSTEM)
+
+    val iconPack by produceState<IconPackTheme?>(initialValue = null, iconPackPkg) {
+        value = withContext(Dispatchers.Default) {
+            if (iconPackPkg.isEmpty()) null else iconPackManager.loadPack(iconPackPkg)
+        }
+    }
+
+    // Shared drag session: one for every page + the root-level ghost.
+    val drag = remember { DragDropState() }
+
+    // Pages: built-in tabs (ordinal order: HOME, WIDGETS, COLLECTIONS, ALL_APPS),
+    // then custom widget spaces, then a trailing "Add space" page.
+    val customScreens by settings.customScreens.collectAsState(initial = emptyList())
+    val builtInCount = LauncherTab.entries.size
+    val pagerState = rememberPagerState(initialPage = 0) {
+        builtInCount + customScreens.size + 1
+    }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showCustomize by rememberSaveable { mutableStateOf(false) }
+
+    // Removing a space shrinks the pager; keep currentPage within bounds.
+    LaunchedEffect(pagerState.pageCount) {
+        val last = pagerState.pageCount - 1
+        if (pagerState.currentPage > last) pagerState.scrollToPage(last)
+    }
+
+    // Widget host listens while the activity is started.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> widgetController.startListening()
+                Lifecycle.Event.ON_STOP -> widgetController.stopListening()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            widgetController.stopListening()
+        }
+    }
+
+    fun launch(app: AppEntry) {
+        context.startActivity(appRepository.launchIntent(app))
+    }
+
+    // HOME key while in front: close overlays, return to the home page.
+    LaunchedEffect(Unit) {
+        homeEvents.collect {
+            showCustomize = false
+            showSettings = false
+            pagerState.animateScrollToPage(LauncherTab.HOME.ordinal)
+        }
+    }
+
+    // Launchers swallow back on home; sub-screens pop back to the home page.
+    BackHandler {
+        when {
+            showCustomize -> showCustomize = false
+            showSettings -> showSettings = false
+            pagerState.currentPage != LauncherTab.HOME.ordinal ->
+                scope.launch { pagerState.animateScrollToPage(LauncherTab.HOME.ordinal) }
+            else -> Unit
+        }
+    }
+
+    VibiateTheme(themeMode, font = fontFamily) {
+        CompositionLocalProvider(LocalDragDrop provides drag) {
+            // Translucent scrim: the system wallpaper shows through everywhere.
+            Surface(
+            Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background.copy(
+                alpha = if (LocalIsDark.current) 0.35f else 0.25f
+            ),
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                LauncherTopBar(
+                    // Custom/add pages and settings: underline nothing.
+                    activeTab = pagerState.currentPage
+                        .takeIf { it in LauncherTab.entries.indices && !showSettings }
+                        ?.let { LauncherTab.entries[it] },
+                    onTabSelected = { tab ->
+                        showSettings = false
+                        scope.launch { pagerState.animateScrollToPage(tab.ordinal) }
+                    },
+                    onSettingsClick = { showSettings = true },
+                )
+                // Long-press on empty space anywhere opens the customize sheet.
+                // Icons/widgets consume their own long-presses first (Main pass
+                // runs child-to-parent), so only unhandled gaps reach this.
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onLongPress = {
+                                    if (!showSettings) showCustomize = true
+                                }
+                            )
+                        }
+                ) {
+                    if (showSettings) {
+                        // Settings is a full opaque page; pad for the hidden dock.
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .navigationBarsPadding(),
+                            color = MaterialTheme.colorScheme.background,
+                        ) {
+                            SettingsScreen(
+                                settings = settings,
+                                iconPackManager = iconPackManager,
+                                appRepository = appRepository,
+                                wallpaperRotator = wallpaperRotator,
+                            )
+                        }
+                    } else {
+                        HorizontalPager(
+                            state = pagerState,
+                            modifier = Modifier.fillMaxSize(),
+                            userScrollEnabled = !drag.isDragging,
+                            // Keep the drag-source page (e.g. A–Z) composed while
+                            // the pager animates to Collections mid-drag, or its
+                            // gesture coroutine is cancelled.
+                            beyondViewportPageCount = 1,
+                        ) { page ->
+                            when {
+                                page < builtInCount -> when (LauncherTab.entries[page]) {
+                                    LauncherTab.HOME -> HomeScreen(settings = settings)
+                                    LauncherTab.WIDGETS -> WidgetsScreen(
+                                        controller = widgetController,
+                                        screenId = 0,
+                                        onAddWidget = { onAddWidget(0) },
+                                    )
+                                    LauncherTab.COLLECTIONS -> CollectionsScreen(
+                                        repository = appRepository,
+                                        settings = settings,
+                                        iconPack = iconPack,
+                                        gridSize = gridSize,
+                                        onLaunch = ::launch,
+                                    )
+                                    LauncherTab.ALL_APPS -> AllAppsScreen(
+                                        repository = appRepository,
+                                        iconPack = iconPack,
+                                        onLaunch = ::launch,
+                                        onDragToCollections = {
+                                            scope.launch {
+                                                pagerState.animateScrollToPage(
+                                                    LauncherTab.COLLECTIONS.ordinal,
+                                                )
+                                            }
+                                        },
+                                    )
+                                }
+                                page < builtInCount + customScreens.size -> {
+                                    val screen = customScreens[page - builtInCount]
+                                    WidgetsScreen(
+                                        controller = widgetController,
+                                        screenId = screen.id,
+                                        screenName = screen.name,
+                                        onAddWidget = { onAddWidget(screen.id) },
+                                        onRemoveScreen = {
+                                            widgetController.removeScreen(screen.id)
+                                        },
+                                    )
+                                }
+                                else -> AddScreenPage(
+                                    onAdd = {
+                                        widgetController.addScreen { id ->
+                                            context.getString(R.string.space_name, id)
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+                // Dock persists under all pager pages; hidden while settings is open.
+                if (!showSettings) {
+                    LauncherDock(repository = dockRepository, iconPack = iconPack)
+                }
+            }
+        }
+
+        if (showCustomize) {
+            CustomizeSheet(
+                settings = settings,
+                iconPackManager = iconPackManager,
+                wallpaperRotator = wallpaperRotator,
+                gridSize = gridSize,
+                fontFamily = fontFamily,
+                onDismiss = { showCustomize = false },
+                onOpenSettings = {
+                    showCustomize = false
+                    showSettings = true
+                },
+            )
+        }
+
+        // Drag ghost, above everything and untouchable: it follows the finger.
+        DragGhost(iconPack = iconPack)
+        }
+    }
+}
+
+/**
+ * Floating preview of the in-flight drag, drawn in root coordinates so it
+ * tracks the finger even as the pager slides pages underneath. No pointer
+ * input — drops are resolved by [CollectionsScreen]'s tracked bounds.
+ */
+@Composable
+private fun DragGhost(iconPack: IconPackTheme?) {
+    val drag = LocalDragDrop.current
+    val payload = drag.payload ?: return
+    val pointer = drag.pointer
+    val density = LocalDensity.current
+
+    Box(Modifier.fillMaxSize()) {
+        when (payload) {
+            is DragPayload.App -> {
+                val bitmap = remember(payload.app, iconPack) {
+                    val drawable =
+                        iconPack?.drawableFor(payload.app.component) ?: payload.app.icon
+                    drawable.toImageBitmap()
+                }
+                val sizePx = with(density) { 56.dp.roundToPx() }
+                Box(
+                    Modifier
+                        .offset {
+                            IntOffset(
+                                (pointer.x - sizePx / 2).roundToInt(),
+                                (pointer.y - sizePx / 2).roundToInt(),
+                            )
+                        }
+                        .size(56.dp)
+                        .graphicsLayer {
+                            scaleX = 1.15f
+                            scaleY = 1.15f
+                            shadowElevation = 24f
+                        },
+                ) {
+                    bitmap?.let { Image(it, contentDescription = null) }
+                }
+            }
+            is DragPayload.Category -> {
+                val heightPx = with(density) { 52.dp.roundToPx() }
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .offset { IntOffset(0, (pointer.y - heightPx / 2).roundToInt()) }
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp)
+                        .height(52.dp)
+                        .shadow(8.dp, RoundedCornerShape(4.dp)),
+                    shape = RoundedCornerShape(4.dp),
+                    color = if (LocalIsDark.current) {
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+                    } else {
+                        Color.White.copy(alpha = 0.95f)
+                    },
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    ) {
+                        Icon(
+                            imageVector = payload.def.icon,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            text = payload.def.title.uppercase(),
+                            fontSize = 13.sp,
+                            letterSpacing = 3.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
