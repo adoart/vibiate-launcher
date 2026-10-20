@@ -50,6 +50,7 @@ enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
 /** App-wide font family choice, applied through VibiateTheme's Typography. */
 enum class LauncherFont(@param:StringRes val labelRes: Int) {
+    AVIATE(R.string.font_aviate),
     SYSTEM(R.string.font_system),
     SANS_SERIF(R.string.font_sans_serif),
     SERIF(R.string.font_serif),

@@ -64,6 +64,30 @@ wallpapers, icon packs, and a dark/light Aviate palette.
 - [ ] Weather settings: °C/°F units, manual city fallback when no location fix
 - [ ] Widget resize handles & span control (moved from Phase 2)
 
+## Aviate 3.2 parity (from reverse engineering)
+- [x] Montserrat bundled as the Gotham substitute (`LauncherFont.AVIATE`, the
+  new default font; OFL license in `assets/licenses/`)
+- [x] Aviate holoBlue `#33B5E5` accent in both themes; translucent card/skrim
+  palette (`LocalAviateColors`): dark 30%-black cards over wallpaper, light
+  50%-white cards, Aviate greys for titles/labels/icons/dividers
+- [x] Page backdrop: wallpaper clear on Home/Widgets/spaces, skrim faded
+  in/out with pager position on Collections/A–Z, top gradient for the top bar
+- [x] Flat white 48dp Aviate search bar on Collections (hops to A–Z and
+  focuses the field) and A–Z (editable, sort toggle in the trailing slot)
+- [x] Collection cards restyled: 2dp corners, 40dp headers, glyph 16dp, 12sp
+  Medium letter-spaced titles, rotating chevron; expanded rows show labels;
+  "New category" is now a bare text button
+- [x] A–Z restyled: 4-column letter grids with the letter in cell 0 (filled
+  60sp Thin, Roboto), 13sp labels, 1px group dividers, 34dp rail with left
+  hairline and bold/dimmed letters
+- [x] Dock: bare icons on the wallpaper over a bottom gradient, white chevron
+- [x] Home search pill restyled to the flat Aviate bar (G + mic kept)
+- [x] Settings: cyan top bar with back arrow + SETTINGS title, grey section
+  bands, icon rows with hairline dividers
+- [ ] Parity follow-ups: auto column count from screen width (Aviate uses
+  floor((width − 2×4dp) / (icon + 14dp))), People drawer (favourite/recent
+  contacts) on dock pull-up, time-of-day "spaces" with contextual cards
+
 ## Phase 5 — Polish & release
 - [ ] Backup/restore of settings, expanded-state, widget layout
 - [ ] Unit tests (classifier, icon pack parser) + Compose UI smoke tests

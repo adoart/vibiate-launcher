@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Owns the [AppWidgetHost] (hostId 1024) and the persisted list of bound widgets.
@@ -32,9 +33,16 @@ class WidgetController(
     private val _widgets = MutableStateFlow<List<WidgetEntry>>(emptyList())
     val widgets: StateFlow<List<WidgetEntry>> = _widgets
 
+    // restore() rewrites _widgets from DataStore asynchronously; running it on
+    // every ON_START lets a stale read clobber a widget added while an opaque
+    // configure activity was in front. Restore once per controller lifetime.
+    private val restored = AtomicBoolean(false)
+
     fun startListening() {
         host.startListening()
-        scope.launch { restore() }
+        if (restored.compareAndSet(false, true)) {
+            scope.launch { restore() }
+        }
     }
 
     fun stopListening() {

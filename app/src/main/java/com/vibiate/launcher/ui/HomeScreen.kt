@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.WbCloudy
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -43,7 +44,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -53,6 +53,7 @@ import com.vibiate.launcher.data.SettingsRepository
 import com.vibiate.launcher.data.WeatherInfo
 import com.vibiate.launcher.data.WeatherService
 import com.vibiate.launcher.ui.components.rememberNow
+import com.vibiate.launcher.ui.theme.LocalAviateColors
 import com.vibiate.launcher.ui.theme.LocalIsDark
 import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
@@ -120,6 +121,7 @@ fun HomeScreen(settings: SettingsRepository) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         val now = rememberNow()
+        val aviate = LocalAviateColors.current
 
         // Dark mode only: subtle shadow keeps text legible over bright
         // wallpaper (the wallpaper now shows through the launcher).
@@ -136,16 +138,16 @@ fun HomeScreen(settings: SettingsRepository) {
             text = now.format(homeTimeFormat),
             fontSize = 68.sp,
             fontWeight = FontWeight.Light,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = aviate.homeText,
             letterSpacing = 1.sp,
-            style = TextStyle(shadow = shadow),
+            style = LocalTextStyle.current.copy(shadow = shadow),
         )
         Text(
             text = now.format(homeDateFormat),
             fontSize = 14.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = aviate.homeTextSecondary,
             letterSpacing = 2.sp,
-            style = TextStyle(shadow = shadow),
+            style = LocalTextStyle.current.copy(shadow = shadow),
         )
 
         // Weather row: hidden when permission was denied and nothing is cached;
@@ -172,15 +174,15 @@ fun HomeScreen(settings: SettingsRepository) {
                     Text(
                         text = "${weather.temperatureC.roundToInt()}°",
                         fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        style = TextStyle(shadow = shadow),
+                        color = aviate.homeText,
+                        style = LocalTextStyle.current.copy(shadow = shadow),
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
                         text = stringResource(WeatherService.labelResFor(weather.weatherCode)),
                         fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = TextStyle(shadow = shadow),
+                        color = aviate.homeTextSecondary,
+                        style = LocalTextStyle.current.copy(shadow = shadow),
                     )
                 } else {
                     Icon(
@@ -208,28 +210,28 @@ fun HomeScreen(settings: SettingsRepository) {
         Text(
             text = stringResource(R.string.swipe_hint),
             fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+            color = aviate.homeTextSecondary,
             modifier = Modifier.padding(bottom = 20.dp),
         )
     }
 }
 
-/** Rounded full-width Google-style search pill: "G" left, hint, mic right. */
+/** Flat white Aviate-style bar: "G" left, grey hint, mic right. */
 @Composable
 private fun SearchPill(onClick: () -> Unit) {
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 3.dp,
-        shadowElevation = 4.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp),
+        shape = RoundedCornerShape(2.dp),
+        color = Color.White,
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-                .clip(RoundedCornerShape(28.dp))
+                .clip(RoundedCornerShape(2.dp))
                 .clickable(onClick = onClick)
-                .padding(horizontal = 18.dp, vertical = 13.dp),
+                .padding(start = 16.dp, end = 16.dp),
         ) {
             Text(
                 text = "G",
@@ -237,18 +239,18 @@ private fun SearchPill(onClick: () -> Unit) {
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary,
             )
-            Spacer(Modifier.width(14.dp))
+            Spacer(Modifier.width(16.dp))
             Text(
                 text = stringResource(R.string.search_hint),
                 fontSize = 15.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = Color(0xFF999999),
                 modifier = Modifier.weight(1f),
             )
             Icon(
                 imageVector = Icons.Filled.Mic,
                 contentDescription = stringResource(R.string.voice_search),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp),
+                tint = Color(0xFF999999),
+                modifier = Modifier.size(22.dp),
             )
         }
     }

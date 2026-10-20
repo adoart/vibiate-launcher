@@ -2,6 +2,7 @@ package com.vibiate.launcher.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,11 +38,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -65,11 +68,12 @@ import com.vibiate.launcher.ui.components.toImageBitmap
 import com.vibiate.launcher.ui.drag.DragDropState
 import com.vibiate.launcher.ui.drag.DragPayload
 import com.vibiate.launcher.ui.drag.LocalDragDrop
-import com.vibiate.launcher.ui.theme.LocalIsDark
+import com.vibiate.launcher.ui.theme.LocalAviateColors
 import com.vibiate.launcher.ui.theme.VibiateTheme
 import com.vibiate.launcher.widget.WidgetController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -94,7 +98,7 @@ fun LauncherRoot(
     val gridSize by settings.gridSize.collectAsState(
         initial = SettingsRepository.DEFAULT_GRID_SIZE
     )
-    val fontFamily by settings.fontFamily.collectAsState(initial = LauncherFont.SYSTEM)
+    val fontFamily by settings.fontFamily.collectAsState(initial = LauncherFont.AVIATE)
 
     val iconPack by produceState<IconPackTheme?>(initialValue = null, iconPackPkg) {
         value = withContext(Dispatchers.Default) {
@@ -142,6 +146,10 @@ fun LauncherRoot(
         context.startActivity(appRepository.launchIntent(app))
     }
 
+    // Emitted once per Collections-search-bar tap, after the pager settles on
+    // ALL_APPS; the A–Z screen focuses its field on each emission.
+    val azSearchFocus = remember { MutableSharedFlow<Unit>(extraBufferCapacity = 1) }
+
     // HOME key while in front: close overlays, return to the home page.
     LaunchedEffect(Unit) {
         homeEvents.collect {
@@ -164,13 +172,46 @@ fun LauncherRoot(
 
     VibiateTheme(themeMode, font = fontFamily) {
         CompositionLocalProvider(LocalDragDrop provides drag) {
-            // Translucent scrim: the system wallpaper shows through everywhere.
-            Surface(
+        val aviate = LocalAviateColors.current
+        // Backdrop intensity: 0 on Home/Widgets/custom spaces, full on
+        // Collections and A–Z, interpolated while the pager slides.
+        val pagerPos = pagerState.currentPage + pagerState.currentPageOffsetFraction
+        val backdropFraction = when {
+            pagerPos <= LauncherTab.COLLECTIONS.ordinal ->
+                (pagerPos - LauncherTab.WIDGETS.ordinal).coerceIn(0f, 1f)
+            pagerPos <= LauncherTab.ALL_APPS.ordinal -> 1f
+            else -> (1f - (pagerPos - LauncherTab.ALL_APPS.ordinal)).coerceIn(0f, 1f)
+        }
+
+        // Cross-window blur plumbed via FLAG_BLUR_BEHIND reached SurfaceFlinger
+        // (dim layer, backgroundBlurRadius) but the wallpaper never visibly
+        // blurred on the emulator — the stronger skrim stands in for it.
+        val skrimColor = aviate.pageSkrimStrong
+            .copy(alpha = aviate.pageSkrimStrong.alpha * backdropFraction)
+
+        // Transparent background: the system wallpaper shows through.
+        Surface(
             Modifier.fillMaxSize(),
-            color = MaterialTheme.colorScheme.background.copy(
-                alpha = if (LocalIsDark.current) 0.35f else 0.25f
-            ),
+            color = Color.Transparent,
         ) {
+        Box(Modifier.fillMaxSize()) {
+            // "Blurred" Aviate backdrop under Collections/A–Z.
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(skrimColor),
+            )
+            // Top gradient keeps the top bar legible over bright wallpaper.
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(194.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color(0x66000000), Color.Transparent),
+                        ),
+                    ),
+            )
             Column(Modifier.fillMaxSize()) {
                 LauncherTopBar(
                     // Custom/add pages and settings: underline nothing.
@@ -210,6 +251,7 @@ fun LauncherRoot(
                                 iconPackManager = iconPackManager,
                                 appRepository = appRepository,
                                 wallpaperRotator = wallpaperRotator,
+                                onBack = { showSettings = false },
                             )
                         }
                     } else {
@@ -236,11 +278,20 @@ fun LauncherRoot(
                                         iconPack = iconPack,
                                         gridSize = gridSize,
                                         onLaunch = ::launch,
+                                        onSearchClick = {
+                                            scope.launch {
+                                                pagerState.animateScrollToPage(
+                                                    LauncherTab.ALL_APPS.ordinal,
+                                                )
+                                                azSearchFocus.emit(Unit)
+                                            }
+                                        },
                                     )
                                     LauncherTab.ALL_APPS -> AllAppsScreen(
                                         repository = appRepository,
                                         iconPack = iconPack,
                                         onLaunch = ::launch,
+                                        focusRequests = azSearchFocus,
                                         onDragToCollections = {
                                             scope.launch {
                                                 pagerState.animateScrollToPage(
@@ -298,6 +349,7 @@ fun LauncherRoot(
         // Drag ghost, above everything and untouchable: it follows the finger.
         DragGhost(iconPack = iconPack)
         }
+        }
     }
 }
 
@@ -341,21 +393,20 @@ private fun DragGhost(iconPack: IconPackTheme?) {
                 }
             }
             is DragPayload.Category -> {
+                val aviate = LocalAviateColors.current
                 val heightPx = with(density) { 52.dp.roundToPx() }
                 Surface(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .offset { IntOffset(0, (pointer.y - heightPx / 2).roundToInt()) }
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp)
+                        .padding(horizontal = 10.dp)
                         .height(52.dp)
-                        .shadow(8.dp, RoundedCornerShape(4.dp)),
-                    shape = RoundedCornerShape(4.dp),
-                    color = if (LocalIsDark.current) {
-                        MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
-                    } else {
-                        Color.White.copy(alpha = 0.95f)
-                    },
+                        .shadow(8.dp, RoundedCornerShape(2.dp)),
+                    shape = RoundedCornerShape(2.dp),
+                    color = aviate.cardBackground.copy(
+                        alpha = maxOf(aviate.cardBackground.alpha, 0.85f),
+                    ),
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -364,15 +415,16 @@ private fun DragGhost(iconPack: IconPackTheme?) {
                         Icon(
                             imageVector = payload.def.icon,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp),
+                            tint = aviate.cardIcon,
+                            modifier = Modifier.size(16.dp),
                         )
-                        Spacer(Modifier.width(12.dp))
+                        Spacer(Modifier.width(16.dp))
                         Text(
                             text = payload.def.title.uppercase(),
-                            fontSize = 13.sp,
-                            letterSpacing = 3.sp,
-                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            letterSpacing = 1.5.sp,
+                            color = aviate.cardTitle,
                         )
                     }
                 }

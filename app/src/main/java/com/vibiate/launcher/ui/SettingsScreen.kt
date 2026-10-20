@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,12 +12,27 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Autorenew
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.NightsStay
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Wallpaper
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
@@ -32,7 +48,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vibiate.launcher.BuildConfig
@@ -45,9 +64,20 @@ import com.vibiate.launcher.data.WallpaperInterval
 import com.vibiate.launcher.data.WallpaperRotator
 import com.vibiate.launcher.ui.components.IconPackPickerDialog
 import com.vibiate.launcher.ui.components.RadioOption
+import com.vibiate.launcher.ui.theme.AviateBlue
+import com.vibiate.launcher.ui.theme.LocalIsDark
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+private val SectionBandLight = Color(0xFFECECEC)
+private val SectionBandDark = Color(0xFF2D2E30)
+private val RowBgLight = Color.White
+private val RowBgDark = Color(0xFF252628)
+private val RowIconLight = Color(0xFF333333)
+private val RowIconDark = Color(0xFFBFBFBF)
+private val RowDividerLight = Color(0xFFE5E5E5)
+private val RowDividerDark = Color(0xFF333333)
 
 @Composable
 fun SettingsScreen(
@@ -55,6 +85,7 @@ fun SettingsScreen(
     iconPackManager: IconPackManager,
     appRepository: AppRepository,
     wallpaperRotator: WallpaperRotator,
+    onBack: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -89,54 +120,58 @@ fun SettingsScreen(
         }
     }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp),
-    ) {
-        item { SectionHeader("Appearance") }
-        item {
-            SettingsCard {
-                ThemeMode.entries.forEach { mode ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { scope.launch { settings.setThemeMode(mode) } }
-                            .padding(vertical = 4.dp),
-                    ) {
+    Column(Modifier.fillMaxSize().background(sectionBandColor())) {
+        // Aviate top app bar: solid cyan, back arrow + SETTINGS title.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .background(AviateBlue),
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = Color.White,
+                )
+            }
+            Text(
+                text = "SETTINGS",
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+
+        LazyColumn(Modifier.fillMaxSize()) {
+            item { SectionBand("Appearance") }
+            ThemeMode.entries.forEach { mode ->
+                item(key = "theme_${mode.name}") {
+                    val (icon, label) = when (mode) {
+                        ThemeMode.SYSTEM -> Icons.Filled.PhoneAndroid to "System"
+                        ThemeMode.LIGHT -> Icons.Filled.WbSunny to "Light"
+                        ThemeMode.DARK -> Icons.Filled.NightsStay to "Dark"
+                    }
+                    AviateRow(icon, label, onClick = {
+                        scope.launch { settings.setThemeMode(mode) }
+                    }) {
                         RadioButton(selected = themeMode == mode, onClick = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = when (mode) {
-                                ThemeMode.SYSTEM -> "System"
-                                ThemeMode.LIGHT -> "Light"
-                                ThemeMode.DARK -> "Dark"
-                            },
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
                     }
                 }
             }
-        }
 
-        item { SectionHeader("Icon pack") }
-        item {
-            val currentLabel = iconPacks.firstOrNull { it.packageName == iconPackPkg }?.label
-                ?: "System default"
-            SettingsCard {
-                SettingsRow("Icon pack", currentLabel) { showIconPackDialog = true }
+            item { SectionBand("Icon pack") }
+            item {
+                val currentLabel = iconPacks.firstOrNull { it.packageName == iconPackPkg }?.label
+                    ?: "System default"
+                AviateRow(Icons.Filled.Palette, "Icon pack", value = currentLabel,
+                    onClick = { showIconPackDialog = true })
             }
-        }
 
-        item { SectionHeader("Wallpaper rotation") }
-        item {
-            SettingsCard {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Enabled", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
+            item { SectionBand("Wallpaper rotation") }
+            item {
+                AviateRow(Icons.Filled.Wallpaper, "Enabled") {
                     Switch(
                         checked = wpEnabled,
                         onCheckedChange = { on ->
@@ -147,47 +182,59 @@ fun SettingsScreen(
                         },
                     )
                 }
-                Spacer(Modifier.height(8.dp))
-                SettingsRow(
+            }
+            item {
+                AviateRow(
+                    Icons.Filled.Schedule,
                     "Interval",
-                    WallpaperInterval.fromMinutes(wpInterval).label,
-                ) { showIntervalDialog = true }
-                SettingsRow(
+                    value = WallpaperInterval.fromMinutes(wpInterval).label,
+                    onClick = { showIntervalDialog = true },
+                )
+            }
+            item {
+                AviateRow(
+                    Icons.Filled.PhotoLibrary,
                     "Images",
-                    if (wpUris.isEmpty()) "None selected" else "${wpUris.size} selected",
+                    value = if (wpUris.isEmpty()) "None selected" else "${wpUris.size} selected",
+                    onClick = {
+                        pickImages.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    },
+                )
+            }
+            item {
+                AviateRow(Icons.Filled.Autorenew, "Rotate now",
+                    onClick = { wallpaperRotator.rotateNow() })
+            }
+
+            item { SectionBand("Apps") }
+            item {
+                AviateRow(Icons.Filled.Refresh, "Rescan apps", value = "Reload installed app list",
+                    onClick = { appRepository.invalidate() })
+            }
+
+            item { SectionBand("About") }
+            item {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(rowColor())
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
                 ) {
-                    pickImages.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    Text(
+                        text = "Vibiate — an Aviate-inspired launcher",
+                        color = rowTextColor(),
+                        fontSize = 16.sp,
+                    )
+                    Text(
+                        text = "Version ${BuildConfig.VERSION_NAME}",
+                        color = Color(0xFF999999),
+                        fontSize = 13.sp,
                     )
                 }
-                SettingsRow("Rotate now", "") { wallpaperRotator.rotateNow() }
             }
         }
-
-        item { SectionHeader("Apps") }
-        item {
-            SettingsCard {
-                SettingsRow("Rescan apps", "Reload installed app list") {
-                    appRepository.invalidate()
-                }
-            }
-        }
-
-        item { SectionHeader("About") }
-        item {
-            SettingsCard {
-                Text(
-                    text = "Vibiate — an Aviate-inspired launcher",
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = "Version ${BuildConfig.VERSION_NAME}",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 12.sp,
-                )
-            }
-        }
-        item { Spacer(Modifier.height(32.dp)) }
     }
 
     if (showIconPackDialog) {
@@ -225,39 +272,73 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun SectionHeader(title: String) {
+private fun sectionBandColor(): Color =
+    if (LocalIsDark.current) SectionBandDark else SectionBandLight
+
+@Composable
+private fun rowColor(): Color = if (LocalIsDark.current) RowBgDark else RowBgLight
+
+@Composable
+private fun rowTextColor(): Color = if (LocalIsDark.current) Color.White else RowIconLight
+
+@Composable
+private fun rowIconColor(): Color = if (LocalIsDark.current) RowIconDark else RowIconLight
+
+@Composable
+private fun dividerColor(): Color = if (LocalIsDark.current) RowDividerDark else RowDividerLight
+
+/** Full-width grey band naming the section below it. */
+@Composable
+private fun SectionBand(title: String) {
     Text(
-        text = title.uppercase(),
-        fontSize = 12.sp,
-        letterSpacing = 2.sp,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 20.dp, bottom = 8.dp),
+        text = title,
+        fontSize = 15.sp,
+        color = Color(0xFF999999),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .background(sectionBandColor())
+            .padding(start = 16.dp)
+            .wrapContentHeight(Alignment.CenterVertically),
     )
 }
 
+/** One Aviate settings row: leading icon, 16sp title, optional trailing slot. */
 @Composable
-private fun SettingsCard(content: @Composable () -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(Modifier.padding(16.dp)) { content() }
-    }
-}
-
-@Composable
-private fun SettingsRow(title: String, value: String, onClick: () -> Unit) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 8.dp),
-    ) {
-        Text(title, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
-        if (value.isNotEmpty()) {
-            Text(value, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+private fun AviateRow(
+    icon: ImageVector,
+    title: String,
+    value: String? = null,
+    onClick: (() -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    Column(Modifier.fillMaxWidth().background(rowColor())) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 56.dp)
+                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+                .padding(start = 16.dp, end = 16.dp),
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = rowIconColor(),
+                modifier = Modifier.size(24.dp),
+            )
+            Spacer(Modifier.width(32.dp))
+            Text(
+                text = title,
+                fontSize = 16.sp,
+                color = rowTextColor(),
+                modifier = Modifier.weight(1f),
+            )
+            if (value != null) {
+                Text(text = value, fontSize = 13.sp, color = Color(0xFF999999))
+            }
+            trailing?.invoke()
         }
+        Spacer(Modifier.fillMaxWidth().height(1.dp).background(dividerColor()))
     }
 }
-

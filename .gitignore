@@ -15,4 +15,5 @@ app/build
 !debug.keystore
 .kotlin
 screenshots/
+aviate-apk/
 .devin/config.local.json

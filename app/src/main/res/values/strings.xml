@@ -58,6 +58,7 @@
     <string name="customize_icon_pack">Icon pack</string>
     <string name="icon_pack_default">System default</string>
     <string name="customize_font">Font</string>
+    <string name="font_aviate">Aviate (Montserrat)</string>
     <string name="font_system">System default</string>
     <string name="font_sans_serif">Sans serif</string>
     <string name="font_serif">Serif</string>

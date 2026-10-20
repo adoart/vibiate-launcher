@@ -67,7 +67,7 @@ class SettingsRepository(private val context: Context) {
 
     val fontFamily: Flow<LauncherFont> = store.data.map {
         runCatching { LauncherFont.valueOf(it[Keys.FONT_FAMILY] ?: "") }
-            .getOrDefault(LauncherFont.SYSTEM)
+            .getOrDefault(LauncherFont.AVIATE)
     }
 
     suspend fun setFontFamily(font: LauncherFont) {

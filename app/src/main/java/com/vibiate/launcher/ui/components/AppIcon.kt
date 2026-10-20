@@ -18,12 +18,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vibiate.launcher.data.AppEntry
@@ -58,6 +60,8 @@ fun AppIcon(
     dragPayload: (() -> DragPayload)? = null,
     onDragMoved: (() -> Unit)? = null,
     onLongPress: (() -> Unit)? = null,
+    labelSize: TextUnit = 11.sp,
+    labelColor: Color = Color.Unspecified,
     onLaunch: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -107,8 +111,12 @@ fun AppIcon(
         if (showLabel) {
             Text(
                 text = app.label,
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = labelSize,
+                color = if (labelColor == Color.Unspecified) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    labelColor
+                },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,

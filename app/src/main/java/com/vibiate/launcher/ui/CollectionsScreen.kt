@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -27,7 +28,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -46,10 +46,10 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vibiate.launcher.R
@@ -61,6 +61,7 @@ import com.vibiate.launcher.data.SettingsRepository
 import com.vibiate.launcher.data.UserCategory
 import com.vibiate.launcher.data.buildCollections
 import com.vibiate.launcher.ui.components.AddAppsDialog
+import com.vibiate.launcher.ui.components.AviateSearchBar
 import com.vibiate.launcher.ui.components.CategoryEditorDialog
 import com.vibiate.launcher.ui.components.CategorySection
 import com.vibiate.launcher.ui.components.MoveToCategoryDialog
@@ -69,7 +70,7 @@ import com.vibiate.launcher.ui.drag.DragPayload
 import com.vibiate.launcher.ui.drag.LocalDragDrop
 import com.vibiate.launcher.ui.drag.SlotId
 import com.vibiate.launcher.ui.drag.trackBounds
-import com.vibiate.launcher.ui.theme.LocalIsDark
+import com.vibiate.launcher.ui.theme.LocalAviateColors
 import kotlinx.coroutines.launch
 
 /**
@@ -84,6 +85,8 @@ fun CollectionsScreen(
     iconPack: IconPackTheme?,
     gridSize: Int,
     onLaunch: (AppEntry) -> Unit,
+    /** Tap on the Aviate search bar: hop to the A–Z page and focus its field. */
+    onSearchClick: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -264,23 +267,31 @@ fun CollectionsScreen(
         }
     }
 
-    if (!settingsLoaded) {
-        Box(Modifier.fillMaxSize())
-    } else if (collections.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                text = if (loaded) "No apps found" else "Loading apps…",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    } else {
+    val aviate = LocalAviateColors.current
+
+    Column(Modifier.fillMaxSize()) {
+        AviateSearchBar(
+            hint = stringResource(R.string.search_apps),
+            onClick = onSearchClick,
+        )
+        if (!settingsLoaded) {
+            Box(Modifier.fillMaxSize())
+        } else if (collections.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = if (loaded) "No apps found" else "Loading apps…",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
         LazyColumn(
             state = listState,
             modifier = Modifier
-                .fillMaxSize()
+                .weight(1f)
+                .fillMaxWidth()
                 .trackBounds("collections_list"),
-            contentPadding = PaddingValues(vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            contentPadding = PaddingValues(vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             items(
                 preview.rows,
@@ -299,8 +310,26 @@ fun CollectionsScreen(
                             iconPack = iconPack,
                             gridSize = gridSize,
                             onToggle = {
+                                val expanding = !expanded
                                 expandedState.value =
-                                    expandedMap + (def.key to !expanded)
+                                    expandedMap + (def.key to expanding)
+                                if (expanding) {
+                                    // Chase the grow animation so the whole
+                                    // card ends up inside the viewport.
+                                    scope.launch {
+                                        repeat(30) {
+                                            withFrameNanos {}
+                                            val info = listState.layoutInfo
+                                            val item = info.visibleItemsInfo
+                                                .firstOrNull { it.key == def.key }
+                                                ?: return@launch
+                                            val overflow = item.offset + item.size -
+                                                info.viewportEndOffset
+                                            if (overflow <= 0) return@launch
+                                            listState.scrollBy(overflow.toFloat())
+                                        }
+                                    }
+                                }
                             },
                             onLaunch = onLaunch,
                             modifier = Modifier
@@ -330,21 +359,22 @@ fun CollectionsScreen(
                         Modifier
                             .animateItem()
                             .fillMaxWidth()
-                            .padding(horizontal = 8.dp)
-                            .height(56.dp)
+                            .padding(horizontal = 10.dp)
+                            .height(40.dp)
                             .border(
                                 2.dp,
                                 MaterialTheme.colorScheme.primary,
-                                RoundedCornerShape(4.dp),
+                                RoundedCornerShape(2.dp),
                             ),
                     )
                 }
             }
             if (!isCategoryDrag) {
                 item(key = "new_category") {
-                    NewCategoryCard { showNewCategory = true }
+                    NewCategoryRow { showNewCategory = true }
                 }
             }
+        }
         }
     }
 
@@ -510,42 +540,31 @@ private class DragPreview(
     val categoryDropOrder: List<String>? = null,
 )
 
-/** The trailing "+ New category" card, styled like the collection cards. */
+/** The trailing "+ New category" action: a bare text button under the cards. */
 @Composable
-private fun NewCategoryCard(onClick: () -> Unit) {
-    Surface(
+private fun NewCategoryRow(onClick: () -> Unit) {
+    val aviate = LocalAviateColors.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp),
-        shape = RoundedCornerShape(4.dp),
-        color = if (LocalIsDark.current) {
-            MaterialTheme.colorScheme.surface.copy(alpha = 0.78f)
-        } else {
-            Color.White.copy(alpha = 0.92f)
-        },
+            .heightIn(min = 48.dp)
+            .clickable(onClick = onClick),
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onClick)
-                .padding(vertical = 18.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Add,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp),
-            )
-            Spacer(Modifier.size(8.dp))
-            Text(
-                text = stringResource(R.string.new_category),
-                color = MaterialTheme.colorScheme.onSurface,
-                fontSize = 14.sp,
-                letterSpacing = 1.sp,
-            )
-        }
+        Icon(
+            imageVector = Icons.Filled.Add,
+            contentDescription = null,
+            tint = aviate.cardTitle,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.size(8.dp))
+        Text(
+            text = stringResource(R.string.new_category),
+            color = aviate.cardTitle,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Medium,
+        )
     }
 }
 
