@@ -143,6 +143,7 @@ fun LauncherRoot(
     }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showCustomize by rememberSaveable { mutableStateOf(false) }
+    var widgetEditing by remember { mutableStateOf(false) }
 
     // Removing a space shrinks the pager; keep currentPage within bounds.
     LaunchedEffect(pagerState.pageCount) {
@@ -284,7 +285,7 @@ fun LauncherRoot(
                         HorizontalPager(
                             state = pagerState,
                             modifier = Modifier.fillMaxSize(),
-                            userScrollEnabled = !drag.isDragging,
+                            userScrollEnabled = !drag.isDragging && !widgetEditing,
                             // Keep the drag-source page (e.g. A–Z) composed while
                             // the pager animates to Collections mid-drag, or its
                             // gesture coroutine is cancelled.
@@ -296,7 +297,7 @@ fun LauncherRoot(
                                     LauncherTab.WIDGETS -> WidgetsScreen(
                                         controller = widgetController,
                                         screenId = 0,
-                                        onAddWidget = { onAddWidget(0) },
+                                        onEditingChange = { widgetEditing = it },
                                     )
                                     LauncherTab.COLLECTIONS -> CollectionsScreen(
                                         repository = appRepository,
@@ -336,7 +337,7 @@ fun LauncherRoot(
                                         controller = widgetController,
                                         screenId = screen.id,
                                         screenName = screen.name,
-                                        onAddWidget = { onAddWidget(screen.id) },
+                                        onEditingChange = { widgetEditing = it },
                                         onRemoveScreen = {
                                             widgetController.removeScreen(screen.id)
                                         },
@@ -373,6 +374,26 @@ fun LauncherRoot(
                 onOpenSettings = {
                     showCustomize = false
                     showSettings = true
+                },
+                onAddWidget = {
+                    showCustomize = false
+                    // Target: the Widgets page -> 0; a custom space -> its id;
+                    // anywhere else -> Widgets page after paging to it.
+                    val page = pagerState.currentPage
+                    val target = when {
+                        page == LauncherTab.WIDGETS.ordinal -> 0
+                        page in builtInCount until builtInCount + customScreens.size ->
+                            customScreens[page - builtInCount].id
+                        else -> 0
+                    }
+                    if (page != LauncherTab.WIDGETS.ordinal &&
+                        page !in builtInCount until builtInCount + customScreens.size
+                    ) {
+                        scope.launch {
+                            pagerState.animateScrollToPage(LauncherTab.WIDGETS.ordinal)
+                        }
+                    }
+                    onAddWidget(target)
                 },
             )
         }

@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.Color
 
 // Aviate-inspired palette
 val AviateBlue = Color(0xFF33B5E5) // Aviate holoBlue accent
+val AviateOrange = Color(0xFFEF5742) // Aviate holoOrange accent
 
 val DarkBackground = Color(0xFF121212)
 val DarkSurface = Color(0xFF1E1E1E)

@@ -95,26 +95,38 @@ data class IconPackInfo(val packageName: String, val label: String)
 
 /**
  * One bound app widget. [screenId] is 0 for the built-in Widgets page or the id
- * of a [CustomScreen]. Serialized as "id;pkg;class;screenId"; legacy 3-field
- * lines (no screenId) decode as screenId 0.
+ * of a [CustomScreen]. [cols]/[rows] are the user-chosen span in grid cells
+ * (0 = auto from the provider's min/target sizes); [title] is an optional
+ * label shown above the widget. Serialized as
+ * "id;pkg;class;screenId;cols;rows;title"; legacy 3- and 4-field lines decode
+ * with cols/rows 0 and an empty title.
  */
 data class WidgetEntry(
     val appWidgetId: Int,
     val providerPackage: String,
     val providerClass: String,
     val screenId: Int = 0,
+    val cols: Int = 0,
+    val rows: Int = 0,
+    val title: String = "",
 ) {
-    fun serialize(): String = "$appWidgetId;$providerPackage;$providerClass;$screenId"
+    fun serialize(): String =
+        "$appWidgetId;$providerPackage;$providerClass;$screenId;$cols;$rows;" +
+            title.replace('\n', ' ').replace('\r', ' ')
     val component: ComponentName get() = ComponentName(providerPackage, providerClass)
 
     companion object {
         fun deserialize(s: String): WidgetEntry? {
-            val parts = s.split(';')
-            if (parts.size !in 3..4) return null
+            // Title is last so a ';' inside it survives the split.
+            val parts = s.split(';', limit = 7)
+            if (parts.size < 3) return null
             val id = parts[0].toIntOrNull() ?: return null
-            // Missing or malformed screenId falls back to the built-in page.
+            // Missing or malformed fields fall back to defaults.
             val screenId = parts.getOrNull(3)?.toIntOrNull() ?: 0
-            return WidgetEntry(id, parts[1], parts[2], screenId)
+            val cols = parts.getOrNull(4)?.toIntOrNull() ?: 0
+            val rows = parts.getOrNull(5)?.toIntOrNull() ?: 0
+            val title = parts.getOrNull(6) ?: ""
+            return WidgetEntry(id, parts[1], parts[2], screenId, cols, rows, title)
         }
     }
 }

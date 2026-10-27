@@ -6,6 +6,10 @@ import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProviderInfo
 import android.content.ComponentName
 import android.content.Context
+import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
+import android.view.ViewConfiguration
+import kotlin.math.abs
 import com.vibiate.launcher.data.CustomScreen
 import com.vibiate.launcher.data.SettingsRepository
 import com.vibiate.launcher.data.WidgetEntry
@@ -26,7 +30,7 @@ class WidgetController(
     private val context: Context,
     private val settings: SettingsRepository,
 ) {
-    val host = AppWidgetHost(context, HOST_ID)
+    val host = LauncherAppWidgetHost(context, HOST_ID)
     private val manager = AppWidgetManager.getInstance(context)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -79,6 +83,23 @@ class WidgetController(
         persist()
     }
 
+    /** Set a widget's grid span (cells). 0 on either axis returns to auto. */
+    fun resizeWidget(appWidgetId: Int, cols: Int, rows: Int) {
+        _widgets.value = _widgets.value.map {
+            if (it.appWidgetId == appWidgetId) it.copy(cols = cols, rows = rows) else it
+        }
+        persist()
+    }
+
+    /** Set the small title shown above a widget; empty clears it. */
+    fun renameWidget(appWidgetId: Int, title: String) {
+        val t = title.trim().replace('\n', ' ').take(40)
+        _widgets.value = _widgets.value.map {
+            if (it.appWidgetId == appWidgetId) it.copy(title = t) else it
+        }
+        persist()
+    }
+
     // ---- Custom screens ----
 
     /**
@@ -112,6 +133,12 @@ class WidgetController(
         return host.createView(context, entry.appWidgetId, info)
     }
 
+    /** Reorder [screenId]'s widgets in place within the global list. */
+    fun moveWidgets(screenId: Int, orderedIds: List<Int>) {
+        _widgets.value = mergeScreenOrder(_widgets.value, screenId, orderedIds)
+        persist()
+    }
+
     private suspend fun restore() {
         val saved = settings.widgets.first()
         // Drop entries whose ids are no longer bound (e.g. provider uninstalled).
@@ -127,5 +154,124 @@ class WidgetController(
 
     companion object {
         const val HOST_ID = 1024
+    }
+}
+
+/**
+ * Host that creates [LongPressAppWidgetHostView]s so widget long-presses can
+ * surface a context menu (AppWidgetHostView swallows touches, so Compose
+ * never sees the gesture).
+ */
+class LauncherAppWidgetHost(context: Context, hostId: Int) : AppWidgetHost(context, hostId) {
+
+    /** Invoked with the host view whose widget was long-pressed. */
+    var onWidgetLongPress: ((AppWidgetHostView) -> Unit)? = null
+
+    override fun onCreateView(
+        context: Context,
+        appWidgetId: Int,
+        provider: AppWidgetProviderInfo?,
+    ): AppWidgetHostView = LongPressAppWidgetHostView(context).apply {
+        onLongPress = { onWidgetLongPress?.invoke(this) }
+    }
+}
+
+/**
+ * [AppWidgetHostView] that detects long-press itself: on ACTION_DOWN it posts
+ * a delayed check; moving beyond the touch slop or releasing cancels it. When
+ * it fires, the rest of the gesture is intercepted so the widget doesn't also
+ * receive a click.
+ */
+class LongPressAppWidgetHostView(context: Context) : AppWidgetHostView(context) {
+
+    var onLongPress: (() -> Unit)? = null
+    var onDragStart: (() -> Unit)? = null
+    var onDragMove: ((rawX: Float, rawY: Float) -> Unit)? = null
+    var onDragEnd: ((cancelled: Boolean) -> Unit)? = null
+
+    private var downX = 0f
+    private var downY = 0f
+    private var longPressFired = false
+    private var dragActive = false
+    private val slop = ViewConfiguration.get(context).scaledTouchSlop
+    private val longPressCheck = Runnable {
+        longPressFired = true
+        // Claim the gesture now: otherwise the page scroll / pager steal the
+        // first move past slop and cancel us before a drag can start.
+        parent?.requestDisallowInterceptTouchEvent(true)
+        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        onLongPress?.invoke()
+    }
+
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                longPressFired = false
+                dragActive = false
+                downX = ev.rawX
+                downY = ev.rawY
+                postDelayed(longPressCheck, ViewConfiguration.getLongPressTimeout().toLong())
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!longPressFired &&
+                    (abs(ev.rawX - downX) > slop || abs(ev.rawY - downY) > slop)
+                ) {
+                    removeCallbacks(longPressCheck)
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                removeCallbacks(longPressCheck)
+        }
+        // Once the long-press fired, take over the gesture: framework
+        // dispatches ACTION_CANCEL to the child that had it.
+        return longPressFired || super.onInterceptTouchEvent(ev)
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (longPressFired) {
+            // The long-press already fired; movement past slop turns the
+            // gesture into a widget drag that Compose mirrors in raw coords.
+            when (event.actionMasked) {
+                MotionEvent.ACTION_MOVE -> {
+                    if (!dragActive &&
+                        (abs(event.rawX - downX) > slop ||
+                            abs(event.rawY - downY) > slop)
+                    ) {
+                        dragActive = true
+                        parent?.requestDisallowInterceptTouchEvent(true)
+                        onDragStart?.invoke()
+                    }
+                    if (dragActive) onDragMove?.invoke(event.rawX, event.rawY)
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (dragActive) onDragEnd?.invoke(false)
+                    reset()
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    if (dragActive) onDragEnd?.invoke(true)
+                    reset()
+                }
+            }
+            return true
+        }
+        if (event.actionMasked == MotionEvent.ACTION_UP ||
+            event.actionMasked == MotionEvent.ACTION_CANCEL
+        ) {
+            removeCallbacks(longPressCheck)
+        }
+        // Claim DOWN even over non-clickable widget areas; otherwise the rest
+        // of the gesture never reaches this view and a drag can't follow.
+        return super.onTouchEvent(event) || event.actionMasked == MotionEvent.ACTION_DOWN
+    }
+
+    private fun reset() {
+        longPressFired = false
+        dragActive = false
+        removeCallbacks(longPressCheck)
+    }
+
+    override fun onDetachedFromWindow() {
+        removeCallbacks(longPressCheck)
+        super.onDetachedFromWindow()
     }
 }

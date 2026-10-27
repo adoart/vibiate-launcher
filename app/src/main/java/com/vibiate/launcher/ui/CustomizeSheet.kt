@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Wallpaper
+import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -64,6 +65,7 @@ fun CustomizeSheet(
     fontFamily: LauncherFont,
     onDismiss: () -> Unit,
     onOpenSettings: () -> Unit,
+    onAddWidget: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var showWallpaperDialog by remember { mutableStateOf(false) }
@@ -90,6 +92,10 @@ fun CustomizeSheet(
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
             )
+            SheetRow(Icons.Filled.Widgets, stringResource(R.string.add_widget)) {
+                onDismiss()
+                onAddWidget()
+            }
             SheetRow(Icons.Filled.Wallpaper, stringResource(R.string.customize_wallpaper)) {
                 showWallpaperDialog = true
             }
