@@ -42,7 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.vibiate.launcher.R
 import com.vibiate.launcher.data.DockEntry
 import com.vibiate.launcher.data.DockRepository
-import com.vibiate.launcher.data.IconPackTheme
+import com.vibiate.launcher.data.IconTheme
 
 private const val DRAG_THRESHOLD_PX = 40f
 
@@ -54,7 +54,7 @@ private const val DRAG_THRESHOLD_PX = 40f
 @Composable
 fun LauncherDock(
     repository: DockRepository,
-    iconPack: IconPackTheme?,
+    iconTheme: IconTheme?,
 ) {
     val entries by repository.entries.collectAsState()
     var expanded by rememberSaveable { mutableStateOf(false) }
@@ -113,15 +113,15 @@ fun LauncherDock(
 
             // Second row (browser, camera, gallery, Play Store, files) expands upward.
             AnimatedVisibility(visible = expanded) {
-                DockRow(entries.drop(5).take(5), iconPack)
+                DockRow(entries.drop(5).take(5), iconTheme)
             }
-            DockRow(entries.take(5), iconPack)
+            DockRow(entries.take(5), iconTheme)
         }
     }
 }
 
 @Composable
-private fun DockRow(entries: List<DockEntry>, iconPack: IconPackTheme?) {
+private fun DockRow(entries: List<DockEntry>, iconTheme: IconTheme?) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -129,7 +129,7 @@ private fun DockRow(entries: List<DockEntry>, iconPack: IconPackTheme?) {
     ) {
         entries.forEach { entry ->
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                DockIcon(entry, iconPack)
+                DockIcon(entry, iconTheme)
             }
         }
     }
@@ -138,12 +138,12 @@ private fun DockRow(entries: List<DockEntry>, iconPack: IconPackTheme?) {
 /** 48dp touch target, no label; long-press opens system app details. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun DockIcon(entry: DockEntry, iconPack: IconPackTheme?) {
+private fun DockIcon(entry: DockEntry, iconTheme: IconTheme?) {
     val context = LocalContext.current
-    val drawable = remember(entry, iconPack) {
-        entry.component?.let { iconPack?.drawableFor(it) } ?: entry.icon
+    val bitmap = remember(entry, iconTheme) {
+        entry.component?.let { iconTheme?.bitmapFor(it, entry.icon) }
+            ?: entry.icon?.toImageBitmap()
     }
-    val bitmap = remember(drawable) { drawable?.toImageBitmap() }
 
     Box(
         modifier = Modifier

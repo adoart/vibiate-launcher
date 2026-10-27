@@ -56,13 +56,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vibiate.launcher.BuildConfig
 import com.vibiate.launcher.data.AppRepository
+import com.vibiate.launcher.data.DockRepository
 import com.vibiate.launcher.data.IconPackInfo
 import com.vibiate.launcher.data.IconPackManager
 import com.vibiate.launcher.data.SettingsRepository
 import com.vibiate.launcher.data.ThemeMode
 import com.vibiate.launcher.data.WallpaperInterval
 import com.vibiate.launcher.data.WallpaperRotator
-import com.vibiate.launcher.ui.components.IconPackPickerDialog
+import com.vibiate.launcher.ui.components.IconPacksDialog
 import com.vibiate.launcher.ui.components.RadioOption
 import com.vibiate.launcher.ui.theme.AviateBlue
 import com.vibiate.launcher.ui.theme.LocalIsDark
@@ -84,6 +85,7 @@ fun SettingsScreen(
     settings: SettingsRepository,
     iconPackManager: IconPackManager,
     appRepository: AppRepository,
+    dockRepository: DockRepository,
     wallpaperRotator: WallpaperRotator,
     onBack: () -> Unit = {},
 ) {
@@ -92,6 +94,9 @@ fun SettingsScreen(
 
     val themeMode by settings.themeMode.collectAsState(initial = ThemeMode.DARK)
     val iconPackPkg by settings.iconPackPackage.collectAsState(initial = "")
+    val iconPackFallbacks by settings.iconPackFallbacks.collectAsState(
+        initial = emptyList()
+    )
     val wpEnabled by settings.wallpaperEnabled.collectAsState(initial = false)
     val wpInterval by settings.wallpaperIntervalMinutes.collectAsState(initial = WallpaperInterval.H24.minutes)
     val wpUris by settings.wallpaperUris.collectAsState(initial = emptyList())
@@ -163,8 +168,13 @@ fun SettingsScreen(
 
             item { SectionBand("Icon pack") }
             item {
-                val currentLabel = iconPacks.firstOrNull { it.packageName == iconPackPkg }?.label
-                    ?: "System default"
+                val primaryLabel = iconPacks
+                    .firstOrNull { it.packageName == iconPackPkg }?.label
+                val currentLabel = when {
+                    primaryLabel == null -> "System default"
+                    iconPackFallbacks.isEmpty() -> primaryLabel
+                    else -> "$primaryLabel + ${iconPackFallbacks.size}"
+                }
                 AviateRow(Icons.Filled.Palette, "Icon pack", value = currentLabel,
                     onClick = { showIconPackDialog = true })
             }
@@ -238,9 +248,11 @@ fun SettingsScreen(
     }
 
     if (showIconPackDialog) {
-        IconPackPickerDialog(
+        IconPacksDialog(
             settings = settings,
             iconPackManager = iconPackManager,
+            appRepository = appRepository,
+            dockRepository = dockRepository,
         ) { showIconPackDialog = false }
     }
 
@@ -272,24 +284,24 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun sectionBandColor(): Color =
+internal fun sectionBandColor(): Color =
     if (LocalIsDark.current) SectionBandDark else SectionBandLight
 
 @Composable
-private fun rowColor(): Color = if (LocalIsDark.current) RowBgDark else RowBgLight
+internal fun rowColor(): Color = if (LocalIsDark.current) RowBgDark else RowBgLight
 
 @Composable
-private fun rowTextColor(): Color = if (LocalIsDark.current) Color.White else RowIconLight
+internal fun rowTextColor(): Color = if (LocalIsDark.current) Color.White else RowIconLight
 
 @Composable
-private fun rowIconColor(): Color = if (LocalIsDark.current) RowIconDark else RowIconLight
+internal fun rowIconColor(): Color = if (LocalIsDark.current) RowIconDark else RowIconLight
 
 @Composable
-private fun dividerColor(): Color = if (LocalIsDark.current) RowDividerDark else RowDividerLight
+internal fun dividerColor(): Color = if (LocalIsDark.current) RowDividerDark else RowDividerLight
 
 /** Full-width grey band naming the section below it. */
 @Composable
-private fun SectionBand(title: String) {
+internal fun SectionBand(title: String) {
     Text(
         text = title,
         fontSize = 15.sp,
@@ -305,7 +317,7 @@ private fun SectionBand(title: String) {
 
 /** One Aviate settings row: leading icon, 16sp title, optional trailing slot. */
 @Composable
-private fun AviateRow(
+internal fun AviateRow(
     icon: ImageVector,
     title: String,
     value: String? = null,

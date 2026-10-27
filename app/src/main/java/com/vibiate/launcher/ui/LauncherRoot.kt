@@ -30,7 +30,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -56,7 +55,7 @@ import com.vibiate.launcher.data.AppEntry
 import com.vibiate.launcher.data.AppRepository
 import com.vibiate.launcher.data.DockRepository
 import com.vibiate.launcher.data.IconPackManager
-import com.vibiate.launcher.data.IconPackTheme
+import com.vibiate.launcher.data.IconTheme
 import com.vibiate.launcher.data.LauncherFont
 import com.vibiate.launcher.data.SettingsRepository
 import com.vibiate.launcher.data.ThemeMode
@@ -100,9 +99,35 @@ fun LauncherRoot(
     )
     val fontFamily by settings.fontFamily.collectAsState(initial = LauncherFont.AVIATE)
 
-    val iconPack by produceState<IconPackTheme?>(initialValue = null, iconPackPkg) {
-        value = withContext(Dispatchers.Default) {
-            if (iconPackPkg.isEmpty()) null else iconPackManager.loadPack(iconPackPkg)
+    val iconPackFallbacks by settings.iconPackFallbacks.collectAsState(
+        initial = emptyList()
+    )
+    val maskUnthemed by settings.maskUnthemedIcons.collectAsState(initial = true)
+    val iconOverrides by settings.iconOverrides.collectAsState(initial = emptyMap())
+    val iconPackRevision by iconPackManager.revision.collectAsState()
+
+    // Built off the main thread (appfilter parses can touch 50k entries) and
+    // prewarmed so the icon swap doesn't stutter. The old theme is kept until
+    // the new one is ready — resetting to null between keys would flicker
+    // every icon back to the system drawable on each settings change.
+    var iconTheme by remember { mutableStateOf<IconTheme?>(null) }
+    LaunchedEffect(
+        iconPackPkg, iconPackFallbacks, maskUnthemed, iconOverrides,
+        iconPackRevision,
+    ) {
+        iconTheme = withContext(Dispatchers.Default) {
+            val theme = IconTheme(
+                context = context.applicationContext,
+                primary = iconPackPkg.takeIf { it.isNotEmpty() }
+                    ?.let { iconPackManager.loadPack(it) },
+                fallbacks = iconPackFallbacks
+                    .mapNotNull { iconPackManager.loadPack(it) },
+                overrides = iconOverrides,
+                maskUnthemed = maskUnthemed,
+                manager = iconPackManager,
+            )
+            theme.prewarm(appRepository.apps.value)
+            theme
         }
     }
 
@@ -250,6 +275,7 @@ fun LauncherRoot(
                                 settings = settings,
                                 iconPackManager = iconPackManager,
                                 appRepository = appRepository,
+                                dockRepository = dockRepository,
                                 wallpaperRotator = wallpaperRotator,
                                 onBack = { showSettings = false },
                             )
@@ -275,7 +301,8 @@ fun LauncherRoot(
                                     LauncherTab.COLLECTIONS -> CollectionsScreen(
                                         repository = appRepository,
                                         settings = settings,
-                                        iconPack = iconPack,
+                                        iconTheme = iconTheme,
+                                        iconPackManager = iconPackManager,
                                         gridSize = gridSize,
                                         onLaunch = ::launch,
                                         onSearchClick = {
@@ -289,7 +316,9 @@ fun LauncherRoot(
                                     )
                                     LauncherTab.ALL_APPS -> AllAppsScreen(
                                         repository = appRepository,
-                                        iconPack = iconPack,
+                                        settings = settings,
+                                        iconPackManager = iconPackManager,
+                                        iconTheme = iconTheme,
                                         onLaunch = ::launch,
                                         focusRequests = azSearchFocus,
                                         onDragToCollections = {
@@ -326,7 +355,7 @@ fun LauncherRoot(
                 }
                 // Dock persists under all pager pages; hidden while settings is open.
                 if (!showSettings) {
-                    LauncherDock(repository = dockRepository, iconPack = iconPack)
+                    LauncherDock(repository = dockRepository, iconTheme = iconTheme)
                 }
             }
         }
@@ -335,6 +364,8 @@ fun LauncherRoot(
             CustomizeSheet(
                 settings = settings,
                 iconPackManager = iconPackManager,
+                appRepository = appRepository,
+                dockRepository = dockRepository,
                 wallpaperRotator = wallpaperRotator,
                 gridSize = gridSize,
                 fontFamily = fontFamily,
@@ -347,7 +378,7 @@ fun LauncherRoot(
         }
 
         // Drag ghost, above everything and untouchable: it follows the finger.
-        DragGhost(iconPack = iconPack)
+        DragGhost(iconTheme = iconTheme)
         }
         }
     }
@@ -359,7 +390,7 @@ fun LauncherRoot(
  * input — drops are resolved by [CollectionsScreen]'s tracked bounds.
  */
 @Composable
-private fun DragGhost(iconPack: IconPackTheme?) {
+private fun DragGhost(iconTheme: IconTheme?) {
     val drag = LocalDragDrop.current
     val payload = drag.payload ?: return
     val pointer = drag.pointer
@@ -368,10 +399,9 @@ private fun DragGhost(iconPack: IconPackTheme?) {
     Box(Modifier.fillMaxSize()) {
         when (payload) {
             is DragPayload.App -> {
-                val bitmap = remember(payload.app, iconPack) {
-                    val drawable =
-                        iconPack?.drawableFor(payload.app.component) ?: payload.app.icon
-                    drawable.toImageBitmap()
+                val bitmap = remember(payload.app, iconTheme) {
+                    iconTheme?.bitmapFor(payload.app.component, payload.app.icon)
+                        ?: payload.app.icon.toImageBitmap()
                 }
                 val sizePx = with(density) { 56.dp.roundToPx() }
                 Box(

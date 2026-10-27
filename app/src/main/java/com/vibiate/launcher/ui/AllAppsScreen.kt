@@ -14,7 +14,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -34,15 +37,20 @@ import androidx.compose.ui.unit.sp
 import com.vibiate.launcher.R
 import com.vibiate.launcher.data.AppEntry
 import com.vibiate.launcher.data.AppRepository
-import com.vibiate.launcher.data.IconPackTheme
+import com.vibiate.launcher.data.IconPackManager
+import com.vibiate.launcher.data.IconTheme
+import com.vibiate.launcher.data.SettingsRepository
 import com.vibiate.launcher.ui.components.AlphabetRail
 import com.vibiate.launcher.ui.components.AppIcon
 import com.vibiate.launcher.ui.components.AviateSearchBar
+import com.vibiate.launcher.ui.components.IconPickerDialog
+import com.vibiate.launcher.ui.components.openAppDetails
 import com.vibiate.launcher.ui.drag.DragPayload
 import com.vibiate.launcher.ui.theme.AviateBlue
 import com.vibiate.launcher.ui.theme.LocalAviateColors
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 
 private data class LetterGroup(val letter: Char, val apps: List<AppEntry>)
@@ -58,16 +66,21 @@ private val railWidth = 34.dp
 @Composable
 fun AllAppsScreen(
     repository: AppRepository,
-    iconPack: IconPackTheme?,
+    settings: SettingsRepository,
+    iconPackManager: IconPackManager,
+    iconTheme: IconTheme?,
     onLaunch: (AppEntry) -> Unit,
     /** Fired once when an icon drag passes slop: move the pager to Collections. */
     onDragToCollections: () -> Unit = {},
     /** Emits to focus the search field (e.g. from the Collections bar). */
     focusRequests: Flow<Unit>? = null,
 ) {
+    val context = LocalContext.current
     val apps by repository.apps.collectAsState()
     var query by rememberSaveable { mutableStateOf("") }
     var ascending by rememberSaveable { mutableStateOf(true) }
+    var menuApp by remember { mutableStateOf<AppEntry?>(null) }
+    var iconPickApp by remember { mutableStateOf<AppEntry?>(null) }
     val focusRequester = remember { FocusRequester() }
 
     if (focusRequests != null) {
@@ -120,7 +133,8 @@ fun AllAppsScreen(
                     .padding(start = 8.dp, end = railWidth),
             ) {
                 itemsIndexed(groups, key = { _, g -> g.letter }) { index, group ->
-                    LetterGroupRow(group, iconPack, onLaunch, onDragToCollections)
+                    LetterGroupRow(group, iconTheme, onLaunch, onDragToCollections,
+                        onLongPress = { menuApp = it })
                     if (index < groups.lastIndex) {
                         GroupDivider()
                     }
@@ -146,14 +160,64 @@ fun AllAppsScreen(
             )
         }
     }
+
+    // Long-press menu: change icon / app info.
+    menuApp?.let { app ->
+        AlertDialog(
+            onDismissRequest = { menuApp = null },
+            title = { Text(app.label) },
+            text = {
+                Column {
+                    Text(
+                        text = stringResource(R.string.change_icon),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                menuApp = null
+                                iconPickApp = app
+                            }
+                            .padding(vertical = 12.dp),
+                    )
+                    Text(
+                        text = stringResource(R.string.app_info),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                menuApp = null
+                                openAppDetails(context, app)
+                            }
+                            .padding(vertical = 12.dp),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { menuApp = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+
+    iconPickApp?.let { app ->
+        IconPickerDialog(
+            app = app,
+            iconPackManager = iconPackManager,
+            settings = settings,
+            currentTheme = iconTheme,
+            onDismiss = { iconPickApp = null },
+        )
+    }
 }
 
 @Composable
 private fun LetterGroupRow(
     group: LetterGroup,
-    iconPack: IconPackTheme?,
+    iconTheme: IconTheme?,
     onLaunch: (AppEntry) -> Unit,
     onDragToCollections: () -> Unit,
+    onLongPress: (AppEntry) -> Unit,
 ) {
     val labelColor = LocalAviateColors.current.cardLabel
     Column(
@@ -177,14 +241,14 @@ private fun LetterGroupRow(
                 )
             }
             group.apps.take(3).forEach { app ->
-                GroupAppCell(app, iconPack, labelColor, onLaunch, onDragToCollections)
+                GroupAppCell(app, iconTheme, labelColor, onLaunch, onDragToCollections, onLongPress)
             }
             repeat(3 - minOf(3, group.apps.size)) { Spacer(Modifier.weight(1f)) }
         }
         group.apps.drop(3).chunked(4).forEach { row ->
             Row(Modifier.fillMaxWidth()) {
                 row.forEach { app ->
-                    GroupAppCell(app, iconPack, labelColor, onLaunch, onDragToCollections)
+                    GroupAppCell(app, iconTheme, labelColor, onLaunch, onDragToCollections, onLongPress)
                 }
                 repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
             }
@@ -195,20 +259,22 @@ private fun LetterGroupRow(
 @Composable
 private fun androidx.compose.foundation.layout.RowScope.GroupAppCell(
     app: AppEntry,
-    iconPack: IconPackTheme?,
+    iconTheme: IconTheme?,
     labelColor: androidx.compose.ui.graphics.Color,
     onLaunch: (AppEntry) -> Unit,
     onDragToCollections: () -> Unit,
+    onLongPress: (AppEntry) -> Unit,
 ) {
     AppIcon(
         app = app,
-        iconPack = iconPack,
+        iconTheme = iconTheme,
         showLabel = true,
         labelSize = 13.sp,
         labelColor = labelColor,
         modifier = Modifier.weight(1f),
         dragPayload = { DragPayload.App(app, sourceKey = null) },
         onDragMoved = onDragToCollections,
+        onLongPress = { onLongPress(app) },
     ) { onLaunch(app) }
 }
 

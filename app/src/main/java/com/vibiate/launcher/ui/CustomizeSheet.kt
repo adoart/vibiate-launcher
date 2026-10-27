@@ -41,7 +41,9 @@ import com.vibiate.launcher.data.IconPackManager
 import com.vibiate.launcher.data.LauncherFont
 import com.vibiate.launcher.data.SettingsRepository
 import com.vibiate.launcher.data.WallpaperRotator
-import com.vibiate.launcher.ui.components.IconPackPickerDialog
+import com.vibiate.launcher.data.AppRepository
+import com.vibiate.launcher.data.DockRepository
+import com.vibiate.launcher.ui.components.IconPacksDialog
 import com.vibiate.launcher.ui.components.RadioOption
 import kotlinx.coroutines.launch
 
@@ -55,6 +57,8 @@ import kotlinx.coroutines.launch
 fun CustomizeSheet(
     settings: SettingsRepository,
     iconPackManager: IconPackManager,
+    appRepository: AppRepository,
+    dockRepository: DockRepository,
     wallpaperRotator: WallpaperRotator,
     gridSize: Int,
     fontFamily: LauncherFont,
@@ -159,9 +163,11 @@ fun CustomizeSheet(
     }
 
     if (showIconPackDialog) {
-        IconPackPickerDialog(
+        IconPacksDialog(
             settings = settings,
             iconPackManager = iconPackManager,
+            appRepository = appRepository,
+            dockRepository = dockRepository,
         ) { showIconPackDialog = false }
     }
 

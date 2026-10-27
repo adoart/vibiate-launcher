@@ -18,6 +18,9 @@ class SettingsRepository(private val context: Context) {
     private object Keys {
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val ICON_PACK = stringPreferencesKey("icon_pack")
+        val ICON_PACK_FALLBACKS = stringPreferencesKey("icon_pack_fallbacks") // newline-joined pkgs, ordered
+        val ICON_MASK_UNTHEMED = booleanPreferencesKey("icon_mask_unthemed")
+        val ICON_OVERRIDES = stringPreferencesKey("icon_overrides") // newline-joined "key=pkg|drawable" / "key=@original"
         val WP_ENABLED = booleanPreferencesKey("wallpaper_enabled")
         val WP_INTERVAL = longPreferencesKey("wallpaper_interval_minutes")
         val WP_URIS = stringPreferencesKey("wallpaper_uris") // newline-joined, ordered
@@ -51,7 +54,47 @@ class SettingsRepository(private val context: Context) {
     val iconPackPackage: Flow<String> = store.data.map { it[Keys.ICON_PACK] ?: "" }
 
     suspend fun setIconPack(pkg: String) {
-        store.edit { it[Keys.ICON_PACK] = pkg }
+        store.edit {
+            it[Keys.ICON_PACK] = pkg
+            // A pack can't be primary and fallback at once.
+            val fallbacks = it[Keys.ICON_PACK_FALLBACKS]?.split('\n')
+                ?.filter { s -> s.isNotBlank() && s != pkg } ?: emptyList()
+            it[Keys.ICON_PACK_FALLBACKS] = fallbacks.joinToString("\n")
+        }
+    }
+
+    /** Fallback packs tried when the primary has no icon for an app. */
+    val iconPackFallbacks: Flow<List<String>> = store.data.map {
+        it[Keys.ICON_PACK_FALLBACKS]?.split('\n')?.filter { s -> s.isNotBlank() }
+            ?: emptyList()
+    }
+
+    suspend fun setIconPackFallbacks(packs: List<String>) {
+        store.edit { it[Keys.ICON_PACK_FALLBACKS] = packs.joinToString("\n") }
+    }
+
+    /** Whether the primary pack's mask/back is composited under unthemed icons. */
+    val maskUnthemedIcons: Flow<Boolean> = store.data.map {
+        it[Keys.ICON_MASK_UNTHEMED] ?: true
+    }
+
+    suspend fun setMaskUnthemedIcons(enabled: Boolean) {
+        store.edit { it[Keys.ICON_MASK_UNTHEMED] = enabled }
+    }
+
+    /** componentKey -> per-app icon choice. */
+    val iconOverrides: Flow<Map<String, IconOverride>> = store.data.map {
+        parseIconOverrides(it[Keys.ICON_OVERRIDES])
+    }
+
+    /** Set (or null to clear) one app's icon override. */
+    suspend fun setIconOverride(componentKey: String, override: IconOverride?) {
+        store.edit { p ->
+            val map = parseIconOverrides(p[Keys.ICON_OVERRIDES]).toMutableMap()
+            if (override == null) map.remove(componentKey)
+            else map[componentKey] = override
+            p[Keys.ICON_OVERRIDES] = serializeIconOverrides(map)
+        }
     }
 
     // ---- Collection grid ----
@@ -302,5 +345,42 @@ class SettingsRepository(private val context: Context) {
 
         private fun serializeAppOrder(map: Map<String, List<String>>): String =
             map.entries.joinToString("\n") { (k, v) -> "$k=${v.joinToString("|")}" }
+
+        private const val OVERRIDE_ORIGINAL = "@original"
+
+        // "componentKey=packPackage|drawable" or "componentKey=@original";
+        // componentKeys never contain '=' so split on the first.
+        internal fun parseIconOverrides(raw: String?): Map<String, IconOverride> =
+            raw?.split('\n')
+                ?.mapNotNull { line ->
+                    val i = line.indexOf('=')
+                    if (i <= 0) return@mapNotNull null
+                    val key = line.substring(0, i)
+                    val value = line.substring(i + 1)
+                    val override = when {
+                        value == OVERRIDE_ORIGINAL -> IconOverride.Original
+                        else -> {
+                            val sep = value.indexOf('|')
+                            if (sep <= 0 || sep == value.length - 1) {
+                                null
+                            } else {
+                                IconOverride.Pack(
+                                    value.substring(0, sep),
+                                    value.substring(sep + 1),
+                                )
+                            }
+                        }
+                    }
+                    override?.let { key to it }
+                }
+                ?.toMap() ?: emptyMap()
+
+        internal fun serializeIconOverrides(map: Map<String, IconOverride>): String =
+            map.entries.joinToString("\n") { (key, override) ->
+                when (override) {
+                    is IconOverride.Original -> "$key=$OVERRIDE_ORIGINAL"
+                    is IconOverride.Pack -> "$key=${override.packPackage}|${override.drawable}"
+                }
+            }
     }
 }

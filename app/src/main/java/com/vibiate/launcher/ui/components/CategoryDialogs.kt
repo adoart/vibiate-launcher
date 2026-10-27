@@ -45,7 +45,7 @@ import com.vibiate.launcher.R
 import com.vibiate.launcher.data.AppEntry
 import com.vibiate.launcher.data.CategoryGlyph
 import com.vibiate.launcher.data.CollectionDef
-import com.vibiate.launcher.data.IconPackTheme
+import com.vibiate.launcher.data.IconTheme
 
 /** One icon+title option row used in the category menus. */
 @Composable
@@ -215,7 +215,7 @@ fun AddAppsDialog(
     category: CollectionDef,
     apps: List<AppEntry>,
     initiallySelected: Set<String>,
-    iconPack: IconPackTheme?,
+    iconTheme: IconTheme?,
     onConfirm: (Set<String>) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -264,7 +264,7 @@ fun AddAppsDialog(
                         ) {
                             AppIcon(
                                 app = app,
-                                iconPack = iconPack,
+                                iconTheme = iconTheme,
                                 showLabel = false,
                                 iconSize = 32.dp,
                                 onLongPress = {},

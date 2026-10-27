@@ -56,7 +56,8 @@ import com.vibiate.launcher.R
 import com.vibiate.launcher.data.AppEntry
 import com.vibiate.launcher.data.AppRepository
 import com.vibiate.launcher.data.CollectionDef
-import com.vibiate.launcher.data.IconPackTheme
+import com.vibiate.launcher.data.IconPackManager
+import com.vibiate.launcher.data.IconTheme
 import com.vibiate.launcher.data.SettingsRepository
 import com.vibiate.launcher.data.UserCategory
 import com.vibiate.launcher.data.buildCollections
@@ -64,6 +65,7 @@ import com.vibiate.launcher.ui.components.AddAppsDialog
 import com.vibiate.launcher.ui.components.AviateSearchBar
 import com.vibiate.launcher.ui.components.CategoryEditorDialog
 import com.vibiate.launcher.ui.components.CategorySection
+import com.vibiate.launcher.ui.components.IconPickerDialog
 import com.vibiate.launcher.ui.components.MoveToCategoryDialog
 import com.vibiate.launcher.ui.drag.CardId
 import com.vibiate.launcher.ui.drag.DragPayload
@@ -82,7 +84,8 @@ import kotlinx.coroutines.launch
 fun CollectionsScreen(
     repository: AppRepository,
     settings: SettingsRepository,
-    iconPack: IconPackTheme?,
+    iconTheme: IconTheme?,
+    iconPackManager: IconPackManager,
     gridSize: Int,
     onLaunch: (AppEntry) -> Unit,
     /** Tap on the Aviate search bar: hop to the A–Z page and focus its field. */
@@ -128,6 +131,7 @@ fun CollectionsScreen(
     var deleteCategory by remember { mutableStateOf<UserCategory?>(null) }
     var appMenuApp by remember { mutableStateOf<AppEntry?>(null) }
     var moveApp by remember { mutableStateOf<AppEntry?>(null) }
+    var iconPickApp by remember { mutableStateOf<AppEntry?>(null) }
 
     // ---- Drag preview ----
     // The list the LazyColumn renders plus the drop data derived from it.
@@ -307,7 +311,7 @@ fun CollectionsScreen(
                             def = def,
                             items = item.items,
                             expanded = expanded,
-                            iconPack = iconPack,
+                            iconTheme = iconTheme,
                             gridSize = gridSize,
                             onToggle = {
                                 val expanding = !expanded
@@ -429,7 +433,7 @@ fun CollectionsScreen(
             category = def,
             apps = apps,
             initiallySelected = initiallySelected,
-            iconPack = iconPack,
+            iconTheme = iconTheme,
             onConfirm = { selected ->
                 addAppsDef = null
                 val inCategory = overrides
@@ -495,6 +499,10 @@ fun CollectionsScreen(
                         appMenuApp = null
                         moveApp = app
                     }
+                    DialogTextRow(stringResource(R.string.change_icon)) {
+                        appMenuApp = null
+                        iconPickApp = app
+                    }
                     DialogTextRow(stringResource(R.string.app_info)) {
                         appMenuApp = null
                         openAppDetails(context, app)
@@ -523,6 +531,16 @@ fun CollectionsScreen(
                 scope.launch { settings.setOverride(app.componentKey, key) }
             },
             onDismiss = { moveApp = null },
+        )
+    }
+
+    iconPickApp?.let { app ->
+        IconPickerDialog(
+            app = app,
+            iconPackManager = iconPackManager,
+            settings = settings,
+            currentTheme = iconTheme,
+            onDismiss = { iconPickApp = null },
         )
     }
 }

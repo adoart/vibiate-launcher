@@ -1,5 +1,6 @@
 package com.vibiate.launcher.ui.components
 
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -29,9 +30,21 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vibiate.launcher.data.AppEntry
-import com.vibiate.launcher.data.IconPackTheme
+import com.vibiate.launcher.data.IconTheme
 import com.vibiate.launcher.ui.drag.DragPayload
 import com.vibiate.launcher.ui.drag.launcherDragGestures
+
+/** Opens the app's system details screen. */
+internal fun openAppDetails(context: Context, app: AppEntry) {
+    runCatching {
+        context.startActivity(
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:${app.packageName}"),
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    }
+}
 
 internal fun Drawable.toImageBitmap(sizePx: Int = 168): ImageBitmap? = runCatching {
     val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
@@ -51,7 +64,7 @@ internal fun Drawable.toImageBitmap(sizePx: Int = 168): ImageBitmap? = runCatchi
 @Composable
 fun AppIcon(
     app: AppEntry,
-    iconPack: IconPackTheme?,
+    iconTheme: IconTheme?,
     showLabel: Boolean,
     modifier: Modifier = Modifier,
     iconSize: Dp = 48.dp,
@@ -65,18 +78,8 @@ fun AppIcon(
     onLaunch: () -> Unit,
 ) {
     val context = LocalContext.current
-    val drawable = remember(app, iconPack) {
-        iconPack?.drawableFor(app.component) ?: app.icon
-    }
-    val bitmap = remember(drawable) { drawable.toImageBitmap() }
-
-    fun openAppDetails() {
-        context.startActivity(
-            Intent(
-                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.parse("package:${app.packageName}"),
-            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
+    val bitmap = remember(app, iconTheme) {
+        iconTheme?.bitmapFor(app.component, app.icon) ?: app.icon.toImageBitmap()
     }
 
     val gestures = when {
@@ -84,13 +87,13 @@ fun AppIcon(
         dragPayload != null -> Modifier.launcherDragGestures(
             payload = dragPayload,
             onTap = onLaunch,
-            onLongPressNoMove = onLongPress ?: { openAppDetails() },
+            onLongPressNoMove = onLongPress ?: { openAppDetails(context, app) },
             onDragMoved = onDragMoved,
         )
         else -> Modifier.combinedClickable(
             onClick = onLaunch,
             onLongClick = {
-                if (onLongPress != null) onLongPress() else openAppDetails()
+                if (onLongPress != null) onLongPress() else openAppDetails(context, app)
             },
         )
     }

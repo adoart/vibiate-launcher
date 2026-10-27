@@ -42,7 +42,7 @@ import androidx.compose.ui.unit.sp
 import com.vibiate.launcher.R
 import com.vibiate.launcher.data.AppEntry
 import com.vibiate.launcher.data.CollectionDef
-import com.vibiate.launcher.data.IconPackTheme
+import com.vibiate.launcher.data.IconTheme
 import com.vibiate.launcher.ui.drag.CardId
 import com.vibiate.launcher.ui.drag.DragPayload
 import com.vibiate.launcher.ui.drag.SlotId
@@ -69,7 +69,7 @@ fun CategorySection(
     def: CollectionDef,
     items: List<AppEntry?>,
     expanded: Boolean,
-    iconPack: IconPackTheme?,
+    iconTheme: IconTheme?,
     gridSize: Int,
     onToggle: () -> Unit,
     onLaunch: (AppEntry) -> Unit,
@@ -194,7 +194,7 @@ fun CategorySection(
                                         ) {
                                             AppIcon(
                                                 app = app,
-                                                iconPack = iconPack,
+                                                iconTheme = iconTheme,
                                                 showLabel = false,
                                                 interactive = false,
                                             ) {}

@@ -28,6 +28,7 @@ class MainActivity : ComponentActivity() {
         override fun onReceive(context: Context, intent: Intent) {
             app.appRepository.invalidate()
             app.dockRepository.invalidate()
+            app.iconPackManager.invalidate(intent.data?.schemeSpecificPart)
         }
     }
 
