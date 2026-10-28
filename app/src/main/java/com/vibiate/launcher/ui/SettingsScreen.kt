@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material.icons.filled.WbSunny
+import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -88,6 +89,7 @@ fun SettingsScreen(
     dockRepository: DockRepository,
     wallpaperRotator: WallpaperRotator,
     onBack: () -> Unit = {},
+    onRestoreHomeWidgets: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -216,6 +218,15 @@ fun SettingsScreen(
             item {
                 AviateRow(Icons.Filled.Autorenew, "Rotate now",
                     onClick = { wallpaperRotator.rotateNow() })
+            }
+
+            item { SectionBand("Home") }
+            item {
+                AviateRow(
+                    Icons.Filled.Widgets,
+                    "Restore default Home widgets",
+                    onClick = onRestoreHomeWidgets,
+                )
             }
 
             item { SectionBand("Apps") }

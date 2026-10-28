@@ -54,6 +54,7 @@ import com.vibiate.launcher.R
 import com.vibiate.launcher.data.AppEntry
 import com.vibiate.launcher.data.AppRepository
 import com.vibiate.launcher.data.DockRepository
+import com.vibiate.launcher.data.HOME_SCREEN_ID
 import com.vibiate.launcher.data.IconPackManager
 import com.vibiate.launcher.data.IconTheme
 import com.vibiate.launcher.data.LauncherFont
@@ -89,6 +90,8 @@ fun LauncherRoot(
     homeEvents: Flow<Unit>,
     /** Start the widget pick flow for the given screen id (0 = built-in Widgets). */
     onAddWidget: (Int) -> Unit,
+    /** Settings -> "Restore default Home widgets". */
+    onRestoreHomeWidgets: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -279,6 +282,7 @@ fun LauncherRoot(
                                 dockRepository = dockRepository,
                                 wallpaperRotator = wallpaperRotator,
                                 onBack = { showSettings = false },
+                                onRestoreHomeWidgets = onRestoreHomeWidgets,
                             )
                         }
                     } else {
@@ -293,7 +297,11 @@ fun LauncherRoot(
                         ) { page ->
                             when {
                                 page < builtInCount -> when (LauncherTab.entries[page]) {
-                                    LauncherTab.HOME -> HomeScreen(settings = settings)
+                                    LauncherTab.HOME -> HomeScreen(
+                                        settings = settings,
+                                        controller = widgetController,
+                                        onEditingChange = { widgetEditing = it },
+                                    )
                                     LauncherTab.WIDGETS -> WidgetsScreen(
                                         controller = widgetController,
                                         screenId = 0,
@@ -377,16 +385,19 @@ fun LauncherRoot(
                 },
                 onAddWidget = {
                     showCustomize = false
-                    // Target: the Widgets page -> 0; a custom space -> its id;
-                    // anywhere else -> Widgets page after paging to it.
+                    // Target: Home -> HOME_SCREEN_ID; the Widgets page -> 0;
+                    // a custom space -> its id; anywhere else -> Widgets page
+                    // after paging to it.
                     val page = pagerState.currentPage
                     val target = when {
+                        page == LauncherTab.HOME.ordinal -> HOME_SCREEN_ID
                         page == LauncherTab.WIDGETS.ordinal -> 0
                         page in builtInCount until builtInCount + customScreens.size ->
                             customScreens[page - builtInCount].id
                         else -> 0
                     }
-                    if (page != LauncherTab.WIDGETS.ordinal &&
+                    if (page != LauncherTab.HOME.ordinal &&
+                        page != LauncherTab.WIDGETS.ordinal &&
                         page !in builtInCount until builtInCount + customScreens.size
                     ) {
                         scope.launch {

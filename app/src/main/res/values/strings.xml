@@ -10,27 +10,9 @@
     <string name="nav_settings">Settings</string>
 
     <!-- Home screen -->
-    <string name="search_hint">Search</string>
-    <string name="voice_search">Voice search</string>
     <string name="swipe_hint">Swipe for collections</string>
-    <string name="weather_unavailable">--</string>
 
     <!-- Weather conditions (WMO codes) -->
-    <string name="weather_clear">Clear</string>
-    <string name="weather_mostly_clear">Mostly clear</string>
-    <string name="weather_partly_cloudy">Partly cloudy</string>
-    <string name="weather_overcast">Overcast</string>
-    <string name="weather_fog">Fog</string>
-    <string name="weather_drizzle">Drizzle</string>
-    <string name="weather_freezing_drizzle">Freezing drizzle</string>
-    <string name="weather_rain">Rain</string>
-    <string name="weather_freezing_rain">Freezing rain</string>
-    <string name="weather_snow">Snow</string>
-    <string name="weather_showers">Showers</string>
-    <string name="weather_snow_showers">Snow showers</string>
-    <string name="weather_thunderstorm">Thunderstorm</string>
-    <string name="weather_hail">Hail storm</string>
-    <string name="weather_unknown">—</string>
 
     <!-- Widget spaces -->
     <string name="add_widget">Add widget</string>

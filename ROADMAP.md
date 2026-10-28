@@ -38,7 +38,7 @@ wallpapers, icon packs, and a dark/light Aviate palette.
 - [ ] Rename/reorder custom spaces, per-space wallpaper, drag widgets between spaces
 - [x] Home page: large thin clock + date, first pager page (Aviate minimal)
 - [x] Weather row: Open-Meteo + coarse location, cached in DataStore, tap to refresh
-- [x] Google search pill on home (Google app → web search → browser fallback)
+- [x] Google search widget on Home (Google Search bar, seeded as a real widget)
 - [x] Microsoft Launcher–style dock: 5 icons, expandable 2nd row via chevron or drag
 - [x] Long-press empty space → "Customize" sheet: wallpaper (one-shot pick or
   rotation settings), grid columns (4/5/6) for collections, icon pack picker,
@@ -61,7 +61,7 @@ wallpapers, icon packs, and a dark/light Aviate palette.
 - [ ] Pull-down / double-tap gestures on home
 - [ ] Notification badges on icons (NotificationListener)
 - [ ] Dock customization: pin/reorder/replace slots, icon count
-- [ ] Weather settings: °C/°F units, manual city fallback when no location fix
+- [x] Home clock/date/weather replaced by Google widgets (Clock + At a glance) — no Vibiate weather service
 - [ ] Widget resize handles & span control (moved from Phase 2)
 
 ## Aviate 3.2 parity (from reverse engineering)

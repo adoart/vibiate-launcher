@@ -15,6 +15,7 @@ import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -119,6 +120,8 @@ fun WidgetsScreen(
     screenId: Int,
     screenName: String? = null,
     onRemoveScreen: (() -> Unit)? = null,
+    header: (@Composable ColumnScope.() -> Unit)? = null,
+    showEmptyState: Boolean = true,
     onEditingChange: (Boolean) -> Unit = {},
 ) {
     val allWidgets by controller.widgets.collectAsState()
@@ -238,8 +241,9 @@ fun WidgetsScreen(
                 }
             }
         }
+        header?.invoke(this)
 
-        if (widgets.isEmpty()) {
+        if (widgets.isEmpty() && showEmptyState) {
             Column(
                 Modifier
                     .fillMaxWidth()
@@ -668,9 +672,10 @@ private fun WidgetCell(
                 )
             }
             Box(
-                // Rearrange keeps the same AndroidView composed at 0 size so
-                // the host-view gesture stream (and widget state) survives.
-                if (rearranging) Modifier.size(0.dp)
+                // Rearrange keeps the same AndroidView composed at 1dp (not
+                // 0: a 0-size AndroidView detaches from the window, which
+                // kills an in-flight drag stream and forces re-inflation).
+                if (rearranging) Modifier.size(1.dp)
                 else Modifier.weight(1f).fillMaxWidth(),
             ) {
                 AndroidView(

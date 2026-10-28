@@ -71,8 +71,17 @@ class WidgetController(
      * Record a bound widget. [screenId] is 0 for the built-in Widgets page or a
      * [CustomScreen] id for a user-created space.
      */
-    fun addWidget(appWidgetId: Int, provider: ComponentName, screenId: Int = 0) {
-        val entry = WidgetEntry(appWidgetId, provider.packageName, provider.className, screenId)
+    fun addWidget(
+        appWidgetId: Int,
+        provider: ComponentName,
+        screenId: Int = 0,
+        cols: Int = 0,
+        rows: Int = 0,
+    ) {
+        val entry = WidgetEntry(
+            appWidgetId, provider.packageName, provider.className,
+            screenId, cols, rows,
+        )
         _widgets.value = _widgets.value.filterNot { it.appWidgetId == appWidgetId } + entry
         persist()
     }
@@ -139,12 +148,16 @@ class WidgetController(
         persist()
     }
 
+    /** True once the persisted widget list has been restored at startup. */
+    val restoredFlow = MutableStateFlow(false)
+
     private suspend fun restore() {
         val saved = settings.widgets.first()
         // Drop entries whose ids are no longer bound (e.g. provider uninstalled).
         val valid = saved.filter { providerInfo(it.appWidgetId) != null }
         _widgets.value = valid
         if (valid.size != saved.size) settings.setWidgets(valid)
+        restoredFlow.value = true
     }
 
     private fun persist() {
@@ -271,7 +284,10 @@ class LongPressAppWidgetHostView(context: Context) : AppWidgetHostView(context) 
     }
 
     override fun onDetachedFromWindow() {
-        removeCallbacks(longPressCheck)
+        // If the view ever detaches mid-drag, cancel rather than leaving the
+        // launcher stuck in rearrange mode.
+        if (dragActive) onDragEnd?.invoke(true)
+        reset()
         super.onDetachedFromWindow()
     }
 }

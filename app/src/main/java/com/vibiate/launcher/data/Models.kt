@@ -57,27 +57,6 @@ enum class LauncherFont(@param:StringRes val labelRes: Int) {
     MONOSPACE(R.string.font_monospace),
 }
 
-/** Last successful weather reading, persisted in DataStore so it renders instantly. */
-data class WeatherInfo(
-    val temperatureC: Double,
-    val weatherCode: Int, // WMO weather interpretation code
-    val fetchedAt: Long,
-) {
-    fun serialize(): String = "$temperatureC;$weatherCode;$fetchedAt"
-
-    companion object {
-        fun deserialize(s: String): WeatherInfo? {
-            val parts = s.split(';')
-            if (parts.size != 3) return null
-            return WeatherInfo(
-                parts[0].toDoubleOrNull() ?: return null,
-                parts[1].toIntOrNull() ?: return null,
-                parts[2].toLongOrNull() ?: return null,
-            )
-        }
-    }
-}
-
 /**
  * One dock slot. [intent] is fully resolved (explicit component, NEW_TASK) and
  * ready to startActivity. When nothing resolved, [icon] is null and [glyph]
@@ -92,6 +71,12 @@ data class DockEntry(
 )
 
 data class IconPackInfo(val packageName: String, val label: String)
+
+/**
+ * Reserved widget screen ids: 0 = built-in Widgets page, >0 = custom widget
+ * spaces, -1 = the Home page.
+ */
+const val HOME_SCREEN_ID = -1
 
 /**
  * One bound app widget. [screenId] is 0 for the built-in Widgets page or the id

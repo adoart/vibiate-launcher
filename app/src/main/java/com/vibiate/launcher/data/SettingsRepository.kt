@@ -27,7 +27,7 @@ class SettingsRepository(private val context: Context) {
         val WP_INDEX = intPreferencesKey("wallpaper_index")
         val WIDGETS = stringPreferencesKey("widgets") // newline-joined WidgetEntry.serialize()
         val CUSTOM_SCREENS = stringPreferencesKey("custom_screens") // newline-joined CustomScreen.serialize()
-        val WEATHER = stringPreferencesKey("weather") // WeatherInfo.serialize()
+        val HOME_WIDGETS_SEEDED = booleanPreferencesKey("home_widgets_seeded")
         val GRID_SIZE = intPreferencesKey("grid_size")
         val FONT_FAMILY = stringPreferencesKey("font_family") // LauncherFont.name
         val CUSTOM_CATEGORIES = stringPreferencesKey("custom_categories") // newline-joined UserCategory.serialize()
@@ -305,15 +305,15 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
-    // ---- Weather cache ----
+    // ---- Default Home widgets ----
 
-    /** Last successful weather fetch, so stale data can render instantly. */
-    val weather: Flow<WeatherInfo?> = store.data.map {
-        it[Keys.WEATHER]?.let(WeatherInfo::deserialize)
+    /** Set after the first-run seed of Google's default Home widgets. */
+    val homeWidgetsSeeded: Flow<Boolean> = store.data.map {
+        it[Keys.HOME_WIDGETS_SEEDED] ?: false
     }
 
-    suspend fun setWeather(info: WeatherInfo) {
-        store.edit { it[Keys.WEATHER] = info.serialize() }
+    suspend fun setHomeWidgetsSeeded(seeded: Boolean) {
+        store.edit { it[Keys.HOME_WIDGETS_SEEDED] = seeded }
     }
 
     companion object {

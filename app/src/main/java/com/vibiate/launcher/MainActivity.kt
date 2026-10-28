@@ -14,8 +14,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
+import com.vibiate.launcher.data.HOME_SCREEN_ID
 import com.vibiate.launcher.ui.LauncherRoot
+import com.vibiate.launcher.widget.SeedSpec
+import com.vibiate.launcher.widget.pickDefaultHomeSpecs
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -46,6 +52,16 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         app.appRepository.ensureLoaded()
 
+        // Seed Google's default Home widgets once per install/upgrade.
+        lifecycleScope.launch {
+            app.widgetController.restoredFlow.first { it }
+            if (!app.settingsRepository.homeWidgetsSeeded.first()) {
+                seedHomeWidgets(
+                    pickDefaultHomeSpecs(this@MainActivity, app.widgetController)
+                )
+            }
+        }
+
         // The theme's android:windowShowWallpaper is not always honored; the
         // runtime flag is the reliable equivalent.
         window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
@@ -71,6 +87,7 @@ class MainActivity : ComponentActivity() {
                 dockRepository = app.dockRepository,
                 homeEvents = homeEvents,
                 onAddWidget = ::startWidgetPick,
+                onRestoreHomeWidgets = ::restoreHomeWidgets,
             )
         }
     }
@@ -96,14 +113,76 @@ class MainActivity : ComponentActivity() {
     /** Screen that requested the in-flight pick; 0 = built-in Widgets page. */
     private var pendingScreenId = 0
 
+    /** Seeded span for the in-flight add; 0 = auto from provider info. */
+    private var pendingCols = 0
+    private var pendingRows = 0
+
     /** Allocated host id for the in-flight pick; -1 when no flow is active. */
     private var pendingWidgetId = -1
 
     /** Provider seen during the pick/bind steps, kept for the config step. */
     private var pendingProvider: ComponentName? = null
 
+    /** Default-widget specs still to seed; empty when no seed flow runs. */
+    private val seedQueue = ArrayDeque<SeedSpec>()
+    private var seeding = false
+
+    /**
+     * Queue default Home widgets and bind them one at a time through the same
+     * bind/configure state machine as a manual add. The Home-screen flag is
+     * persisted when the queue drains so the user isn't prompted every launch.
+     */
+    fun seedHomeWidgets(specs: List<SeedSpec>) {
+        if (specs.isEmpty() || seeding) {
+            if (!seeding) markSeeded()
+            return
+        }
+        seedQueue.clear()
+        seedQueue.addAll(specs)
+        seeding = true
+        startNextSeed()
+    }
+
+    private fun startNextSeed() {
+        val spec = seedQueue.firstOrNull()
+        if (spec == null) {
+            seeding = false
+            markSeeded()
+            return
+        }
+        seedQueue.removeFirst()
+        pendingScreenId = HOME_SCREEN_ID
+        pendingCols = spec.cols
+        pendingRows = spec.rows
+        pendingProvider = spec.candidates.first()
+        pendingWidgetId = app.widgetController.allocateId()
+        val provider = spec.candidates.first()
+        if (app.widgetController.bindIfAllowed(pendingWidgetId, provider)) {
+            finishWidgetAdd(pendingWidgetId)
+        } else {
+            bindWidgetLauncher.launch(
+                Intent(AppWidgetManager.ACTION_APPWIDGET_BIND)
+                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, pendingWidgetId)
+                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER, provider)
+            )
+        }
+    }
+
+    private fun markSeeded() {
+        lifecycleScope.launch { app.settingsRepository.setHomeWidgetsSeeded(true) }
+    }
+
+    /** Settings row: re-seed any default Home widget slots that are missing. */
+    fun restoreHomeWidgets() {
+        seedHomeWidgets(pickDefaultHomeSpecs(this, app.widgetController))
+    }
+
     private fun startWidgetPick(screenId: Int) {
+        // Don't interleave a manual pick with a seed flow.
+        if (seeding) return
         pendingScreenId = screenId
+        pendingCols = 0
+        pendingRows = 0
         pendingWidgetId = app.widgetController.allocateId()
         pickWidgetLauncher.launch(
             Intent(AppWidgetManager.ACTION_APPWIDGET_PICK)
@@ -185,7 +264,9 @@ class MainActivity : ComponentActivity() {
         }
         val provider = info?.provider ?: pendingProvider
         if (provider != null) {
-            app.widgetController.addWidget(id, provider, pendingScreenId)
+            app.widgetController.addWidget(
+                id, provider, pendingScreenId, pendingCols, pendingRows,
+            )
         } else {
             app.widgetController.discardId(id)
         }
@@ -195,6 +276,10 @@ class MainActivity : ComponentActivity() {
     private fun endWidgetFlow() {
         pendingWidgetId = -1
         pendingProvider = null
+        pendingCols = 0
+        pendingRows = 0
+        // A cancelled/skipped seed just moves to the next queued spec.
+        if (seeding) startNextSeed()
     }
 
     // startAppWidgetConfigureActivityForResult delivers through the legacy
@@ -208,7 +293,9 @@ class MainActivity : ComponentActivity() {
         val provider = app.widgetController.providerInfo(id)?.provider
             ?: pendingProvider
         if (resultCode == RESULT_OK && id != -1 && provider != null) {
-            app.widgetController.addWidget(id, provider, pendingScreenId)
+            app.widgetController.addWidget(
+                id, provider, pendingScreenId, pendingCols, pendingRows,
+            )
         } else if (id != -1) {
             app.widgetController.discardId(id)
         }

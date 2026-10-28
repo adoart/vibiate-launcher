@@ -1,5 +1,6 @@
 package com.vibiate.launcher.widget
 
+import com.vibiate.launcher.data.HOME_SCREEN_ID
 import com.vibiate.launcher.data.WidgetEntry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -193,5 +194,62 @@ class WidgetDragTest {
         // Missing ids leave the slot as-is; extra ids are ignored.
         val partial = mergeScreenOrder(all, 0, listOf(4, 3))
         assertEquals(listOf(4, 2, 3, 1, 5), partial.map { it.appWidgetId })
+    }
+}
+
+class HomeScreenIdTest {
+    @Test
+    fun `widget entry round-trips with home screen id`() {
+        val e = WidgetEntry(9, "pkg", "Cls", HOME_SCREEN_ID, 2, 3, "t")
+        assertEquals(e, WidgetEntry.deserialize(e.serialize()))
+        assertEquals(HOME_SCREEN_ID, WidgetEntry.deserialize("9;pkg;Cls;-1")!!.screenId)
+    }
+}
+
+class DefaultHomeWidgetsTest {
+    private fun specs() = listOf(
+        Triple(4, 2, listOf("p/A", "p/B")),
+        Triple(4, 1, listOf("p/C")),
+        Triple(4, 1, listOf("p/D", "p/E")),
+    )
+
+    @Test
+    fun `all installed picks slot order`() {
+        val r = pickDefaultHomeWidgets(
+            installed = setOf("p/A", "p/B", "p/C", "p/D", "p/E"),
+            presentOnHome = emptySet(),
+            slots = specs(),
+        )
+        assertEquals(listOf("p/A", "p/C", "p/D"), r.map { it.first })
+    }
+
+    @Test
+    fun `fallback candidate wins when first missing`() {
+        val r = pickDefaultHomeWidgets(
+            installed = setOf("p/B", "p/C", "p/E"),
+            presentOnHome = emptySet(),
+            slots = specs(),
+        )
+        assertEquals(listOf("p/B", "p/C", "p/E"), r.map { it.first })
+    }
+
+    @Test
+    fun `slot skipped when no candidate installed`() {
+        val r = pickDefaultHomeWidgets(
+            installed = setOf("p/A", "p/D"),
+            presentOnHome = emptySet(),
+            slots = specs(),
+        )
+        assertEquals(listOf("p/A", "p/D"), r.map { it.first })
+    }
+
+    @Test
+    fun `slot skipped when already present on home`() {
+        val r = pickDefaultHomeWidgets(
+            installed = setOf("p/A", "p/B", "p/C", "p/D"),
+            presentOnHome = setOf("p/C"),
+            slots = specs(),
+        )
+        assertEquals(listOf("p/A", "p/D"), r.map { it.first })
     }
 }
