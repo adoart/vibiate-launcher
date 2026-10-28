@@ -28,6 +28,7 @@ import com.vibiate.launcher.widget.WidgetController
 fun HomeScreen(
     settings: SettingsRepository,
     controller: WidgetController,
+    editBlur: Float = 0f,
     onEditingChange: (Boolean) -> Unit = {},
 ) {
     val homeWidgets by controller.widgets.collectAsState()
@@ -40,6 +41,7 @@ fun HomeScreen(
             screenId = HOME_SCREEN_ID,
             header = { Spacer(Modifier.height(24.dp)) },
             showEmptyState = false,
+            editBlur = editBlur,
             onEditingChange = onEditingChange,
         )
         if (!hasWidgets) {

@@ -18,10 +18,8 @@
     <string name="add_widget">Add widget</string>
     <string name="no_widgets">No widgets yet</string>
     <string name="widget_add_hint">Long-press the wallpaper to add one</string>
-    <string name="remove_widget">Remove</string>
-    <string name="widget_resize">Resize</string>
-    <string name="widget_rename">Rename…</string>
-    <string name="widget_cannot_resize">Can\'t be resized</string>
+    <string name="remove_widget">Remove widget</string>
+    <string name="widget_rename">Rename</string>
     <string name="widget_rename_title">Rename widget</string>
     <string name="add_space">Add space</string>
     <string name="space_name">Space %1$d</string>

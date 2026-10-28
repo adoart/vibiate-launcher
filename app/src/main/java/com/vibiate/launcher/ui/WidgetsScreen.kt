@@ -6,10 +6,10 @@ import android.os.Build
 import android.os.Bundle
 import android.util.SizeF
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Box
@@ -23,14 +23,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -51,13 +54,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Shadow
-import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -65,10 +71,6 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.zIndex
 import androidx.compose.ui.res.stringResource
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.ui.text.style.TextOverflow
@@ -80,20 +82,20 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.runtime.withFrameNanos
 import com.vibiate.launcher.R
 import com.vibiate.launcher.data.WidgetEntry
-import com.vibiate.launcher.ui.components.toImageBitmap
-import com.vibiate.launcher.ui.theme.AviateBlue
-import com.vibiate.launcher.ui.theme.AviateOrange
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.HighlightOff
 import com.vibiate.launcher.ui.theme.LocalAviateColors
 import com.vibiate.launcher.ui.theme.LocalIsDark
 import com.vibiate.launcher.widget.LongPressAppWidgetHostView
 import com.vibiate.launcher.widget.GridPos
+import com.vibiate.launcher.widget.GridRect
 import com.vibiate.launcher.widget.GridSpan
 import com.vibiate.launcher.widget.WIDGET_COLUMNS
 import com.vibiate.launcher.widget.WidgetController
 import com.vibiate.launcher.widget.autoSpan
 import com.vibiate.launcher.widget.clampSpan
+import com.vibiate.launcher.widget.dragReorder
 import com.vibiate.launcher.widget.flowLayout
-import com.vibiate.launcher.widget.moved
 import com.vibiate.launcher.widget.pxToCells
 import kotlin.math.roundToInt
 
@@ -101,12 +103,12 @@ private val cellHeight = 96.dp
 private val gridGap = 8.dp
 private val gridPadding = 12.dp
 private val titleHeight = 20.dp
-private val barHeight = 52.dp
-private val barGap = 4.dp
+private val editCorner = 20.dp
+private val editShape = RoundedCornerShape(editCorner)
 
 /**
  * Widget space: bound widgets flow on a 4-column cell grid directly on the
- * wallpaper. Long-press opens a context menu (resize / rename / remove);
+ * wallpaper. Long-press selects a widget for editing and opens a context menu (rename / remove);
  * adding widgets lives in the Customize sheet.
  *
  * [screenId] 0 is the built-in Widgets page; custom spaces pass their
@@ -122,6 +124,8 @@ fun WidgetsScreen(
     onRemoveScreen: (() -> Unit)? = null,
     header: (@Composable ColumnScope.() -> Unit)? = null,
     showEmptyState: Boolean = true,
+    /** 0..1 background-blur fraction while a widget is edited (OxygenOS). */
+    editBlur: Float = 0f,
     onEditingChange: (Boolean) -> Unit = {},
 ) {
     val allWidgets by controller.widgets.collectAsState()
@@ -139,42 +143,44 @@ fun WidgetsScreen(
     var confirmRemove by remember { mutableStateOf(false) }
     var menuId by remember { mutableStateOf<Int?>(null) }
     var renameId by remember { mutableStateOf<Int?>(null) }
-    var resizeId by remember { mutableStateOf<Int?>(null) }
+    // Edit mode: one widget selected — blue frame + handles; dragging a
+    // handle resizes, dragging the body moves/reorders it.
+    var editId by remember { mutableStateOf<Int?>(null) }
     var previewSpan by remember { mutableStateOf<GridSpan?>(null) }
     var dragging by remember { mutableStateOf(false) }
 
-    // Rearrange mode (category-style): widgets collapse to bars while one is
-    // dragged to a new position.
-    var rearrangeDragId by remember { mutableStateOf<Int?>(null) }
-    var rearrangeOrder by remember { mutableStateOf<List<Int>?>(null) }
+    // Move/reorder: the dragged widget follows the finger (translucent +
+    // dimmed), a blue slot marks its grid position, others reflow live.
+    var movingId by remember { mutableStateOf<Int?>(null) }
+    var moveOrder by remember { mutableStateOf<List<Int>?>(null) }
+    var grabOffset by remember { mutableStateOf(Offset.Zero) }
     var fingerRaw by remember { mutableStateOf(Offset.Zero) }
-    var fingerLocal by remember { mutableStateOf(Offset.Zero) }
     var gridScreenPos by remember { mutableStateOf(Offset.Zero) }
     var viewportTop by remember { mutableStateOf(0f) }
     var viewportBottom by remember { mutableStateOf(0f) }
     val scroll = rememberScrollState()
-    val rearranging = rearrangeDragId != null
+    val moving = movingId != null
     val rootView = LocalView.current
     val windowOrigin = remember {
         val loc = IntArray(2)
         rootView.getLocationOnScreen(loc)
         Offset(loc[0].toFloat(), loc[1].toFloat())
     }
-    val orderedWidgets = rearrangeOrder?.mapNotNull { id ->
+    val orderedWidgets = moveOrder?.mapNotNull { id ->
         widgets.firstOrNull { it.appWidgetId == id }
     } ?: widgets
 
-    // Drop resize/menu state when the target widget disappears.
-    val effectiveResizeId = resizeId?.takeIf { id ->
+    // Drop edit/menu state when the target widget disappears.
+    val effectiveEditId = editId?.takeIf { id ->
         widgets.any { it.appWidgetId == id }
     }
-    SideEffect { if (resizeId != effectiveResizeId) resizeId = effectiveResizeId }
-    SideEffect { onEditingChange(effectiveResizeId != null || rearranging) }
+    SideEffect { if (editId != effectiveEditId) editId = effectiveEditId }
+    SideEffect { onEditingChange(effectiveEditId != null || moving) }
 
-    // Edge auto-scroll while rearranging (same 64dp rule as Collections).
-    LaunchedEffect(rearranging) {
+    // Edge auto-scroll while moving (same 64dp rule as Collections).
+    LaunchedEffect(moving) {
         val edge = with(density) { 64.dp.toPx() }
-        while (rearranging) {
+        while (moving) {
             when {
                 fingerRaw.y < viewportTop + edge -> scroll.scrollBy(-18f)
                 fingerRaw.y > viewportBottom - edge -> scroll.scrollBy(18f)
@@ -183,9 +189,11 @@ fun WidgetsScreen(
         }
     }
 
-    BackHandler(enabled = effectiveResizeId != null) {
-        resizeId = null
+    BackHandler(enabled = effectiveEditId != null || moving) {
+        editId = null
         previewSpan = null
+        movingId = null
+        moveOrder = null
     }
 
     Column(
@@ -197,17 +205,19 @@ fun WidgetsScreen(
                 viewportBottom = viewportTop + it.size.height
             }
             .padding(horizontal = gridPadding)
-            // Tap outside a widget exits resize mode. The detector is only
-            // attached while resizing: an always-on detectTapGestures would
+            // Tap outside a widget exits edit mode. The detector is only
+            // attached while editing: an always-on detectTapGestures would
             // consume the down event and starve the parent's long-press
             // (wallpaper long-press -> Customize). Host views swallow their
             // own taps, so tapping a widget never reaches this anyway.
             .then(
-                if (effectiveResizeId != null) {
+                if (effectiveEditId != null || moving) {
                     Modifier.pointerInput(Unit) {
                         detectTapGestures {
-                            resizeId = null
+                            editId = null
                             previewSpan = null
+                            movingId = null
+                            moveOrder = null
                         }
                     }
                 } else {
@@ -273,9 +283,14 @@ fun WidgetsScreen(
                 }
                 val spans = orderedWidgets.map { e -> effectiveSpan(e, infos[e.appWidgetId], density.density, cellW) }
                 val layoutSpans = orderedWidgets.mapIndexed { i, e ->
-                    if (e.appWidgetId == effectiveResizeId) previewSpan ?: spans[i]
+                    if (e.appWidgetId == effectiveEditId) previewSpan ?: spans[i]
                     else spans[i]
                 }
+                val gapPxF = with(density) { gridGap.toPx() }
+                val cellWPx = with(density) { cellW.toPx() }
+                val cellHPx = with(density) { cellHeight.toPx() }
+                val stepX = cellWPx + gapPxF
+                val stepY = cellHPx + gapPxF
 
                 Layout(
                     modifier = Modifier
@@ -289,91 +304,122 @@ fun WidgetsScreen(
                                 WidgetCell(
                                     entry = entry,
                                     info = infos[entry.appWidgetId],
-                                    resizing = entry.appWidgetId == effectiveResizeId,
+                                    editing = entry.appWidgetId == effectiveEditId,
+                                    contentBlur = editBlur > 0.01f &&
+                                        entry.appWidgetId != effectiveEditId &&
+                                        entry.appWidgetId != movingId,
                                     dragging = dragging,
                                     cellW = cellW,
                                     controller = controller,
                                     textShadow = textShadow,
                                     menuOpen = menuId == entry.appWidgetId,
                                     onMenuOpen = {
-                                        // Long-press exits resize mode first.
-                                        resizeId = null
+                                        // Long-press selects the widget for
+                                        // editing AND opens the menu.
+                                        editId = entry.appWidgetId
                                         previewSpan = null
+                                        movingId = null
+                                        moveOrder = null
                                         menuId = entry.appWidgetId
                                     },
+                                    // Dismissing the menu keeps the widget
+                                    // selected for editing.
                                     onMenuDismiss = { menuId = null },
-                                    onResize = {
-                                        menuId = null
-                                        resizeId = entry.appWidgetId
-                                        previewSpan = null
-                                    },
                                     onRename = {
                                         menuId = null
+                                        editId = null
                                         renameId = entry.appWidgetId
                                     },
                                     onRemove = {
                                         menuId = null
                                         controller.removeWidget(entry.appWidgetId)
                                     },
-                                    onDragStart = {
+                                    onDragStart = { dx, dy ->
                                         menuId = null
-                                        resizeId = null
+                                        editId = entry.appWidgetId
                                         previewSpan = null
-                                        rearrangeOrder =
+                                        fingerRaw = Offset(dx, dy)
+                                        // grabOffset = down point relative to
+                                        // the widget's grid-local top-left.
+                                        val idx = orderedWidgets.indexOfFirst {
+                                            it.appWidgetId == entry.appWidgetId
+                                        }
+                                        val gp = flowLayout(layoutSpans)
+                                            .getOrNull(idx)
+                                        grabOffset = if (gp != null) {
+                                            Offset(
+                                                dx - gridScreenPos.x -
+                                                    gp.col * stepX,
+                                                dy - gridScreenPos.y -
+                                                    gp.row * stepY,
+                                            )
+                                        } else Offset.Zero
+                                        moveOrder =
                                             widgets.map { it.appWidgetId }
-                                        rearrangeDragId = entry.appWidgetId
+                                        movingId = entry.appWidgetId
                                     },
                                     onDragMove = { rx, ry ->
                                         fingerRaw = Offset(rx, ry)
-                                        fingerLocal = Offset(
-                                            rx - gridScreenPos.x,
-                                            ry - gridScreenPos.y,
-                                        )
-                                        val order = rearrangeOrder
-                                        val dragId = rearrangeDragId
+                                        val order = moveOrder
+                                        val dragId = movingId
                                         if (order != null && dragId != null) {
-                                            val others = order.filter {
-                                                it != dragId
-                                            }
-                                            val barPx = with(density) {
-                                                (barHeight + barGap).toPx()
-                                            }
-                                            val halfBar = with(density) {
-                                                barHeight.toPx() / 2f
-                                            }
-                                            // Count other bars whose center is
-                                            // above the finger (category rule).
-                                            val insert = others.indices.count {
-                                                i -> i * barPx + halfBar <
-                                                    fingerLocal.y
-                                            }
-                                            val cur = order.indexOf(dragId)
-                                            if (cur >= 0 &&
-                                                insert != cur &&
-                                                insert <= others.size
-                                            ) {
-                                                rearrangeOrder =
-                                                    order.moved(cur, insert)
-                                            }
+                                            val positions =
+                                                flowLayout(layoutSpans)
+                                            val rects =
+                                                orderedWidgets.mapIndexed {
+                                                    i, _ ->
+                                                    val s = layoutSpans[i]
+                                                    val p = positions[i]
+                                                    val l = (p.col * stepX)
+                                                        .roundToInt()
+                                                    val t = (p.row * stepY)
+                                                        .roundToInt()
+                                                    GridRect(
+                                                        l, t,
+                                                        l + (
+                                                            s.cols * cellWPx +
+                                                                (s.cols - 1) *
+                                                                    gapPxF
+                                                            ).roundToInt(),
+                                                        t + (
+                                                            s.rows * cellHPx +
+                                                                (s.rows - 1) *
+                                                                    gapPxF
+                                                            ).roundToInt(),
+                                                    )
+                                                }
+                                            val bottom =
+                                                rects.maxOfOrNull { it.bottom }
+                                                    ?: 0
+                                            moveOrder = dragReorder(
+                                                order, rects, dragId,
+                                                (rx - gridScreenPos.x).toInt(),
+                                                (ry - gridScreenPos.y).toInt(),
+                                                bottom,
+                                            )
                                         }
                                     },
                                     onDragEnd = { cancelled ->
-                                        val order = rearrangeOrder
+                                        val order = moveOrder
                                         if (!cancelled && order != null &&
-                                            rearrangeDragId != null
+                                            order != widgets.map {
+                                                it.appWidgetId
+                                            }
                                         ) {
                                             controller.moveWidgets(
                                                 screenId, order,
                                             )
                                         }
-                                        rearrangeDragId = null
-                                        rearrangeOrder = null
+                                        movingId = null
+                                        moveOrder = null
+                                        // The widget STAYS in edit mode so
+                                        // resize handles are one drag away.
                                     },
-                                    rearranging = rearranging,
+                                    movingThis = entry.appWidgetId == movingId,
                                     onPreviewSpan = { previewSpan = it },
                                     onDraggingChange = { dragging = it },
                                     onResizeDone = { span ->
-                                        // Stay in resize mode after a release:
+                                        // Stay in edit mode after a release:
                                         // only tap-outside / Back / page
                                         // switch exits it.
                                         dragging = false
@@ -385,82 +431,35 @@ fun WidgetsScreen(
                                 )
                             }
                         }
-                        if (rearranging) {
-                            // Cyan placeholder marks the insert slot.
+                        if (movingId != null) {
+                            // Blue slot at the dragged widget's live position
+                            // (measured to its span in the measure block).
                             Box(
                                 Modifier
-                                    .fillMaxWidth()
-                                    .height(barHeight)
                                     .border(
-                                        2.dp, AviateBlue,
-                                        RoundedCornerShape(2.dp),
+                                        1.5.dp,
+                                        Color.White.copy(alpha = 0.5f),
+                                        editShape,
+                                    )
+                                    .background(
+                                        Color.White.copy(alpha = 0.10f),
+                                        editShape,
                                     ),
                             )
-                            // Ghost bar following the finger.
-                            rearrangeDragId?.let { dragId ->
-                                widgets.firstOrNull {
-                                    it.appWidgetId == dragId
-                                }?.let { e ->
-                                    val (label, icon) =
-                                        barVisual(e, infos[dragId])
-                                    WidgetBar(
-                                        label = label,
-                                        icon = icon,
-                                        ghost = true,
-                                    )
-                                }
-                            }
                         }
                     },
                 ) { measurables, constraints ->
-                    if (rearranging) {
-                        // Collapsed bar list: cells keep their AndroidViews
-                        // composed (measured 0×0 for the dragged one) so the
-                        // gesture's host view is never detached mid-drag.
-                        val barPx = barHeight.roundToPx()
-                        val bGapPx = barGap.roundToPx()
-                        val w = constraints.maxWidth
-                        val n = orderedWidgets.size
-                        val placeables = measurables.mapIndexed { i, m ->
-                            when {
-                                i >= n -> m.measure(
-                                    Constraints.fixed(w, barPx),
-                                )
-                                orderedWidgets[i].appWidgetId == rearrangeDragId ->
-                                    m.measure(Constraints.fixed(0, 0))
-                                else -> m.measure(
-                                    Constraints.fixed(w, barPx),
-                                )
-                            }
-                        }
-                        layout(w, n * (barPx + bGapPx)) {
-                            var slot = 0
-                            orderedWidgets.forEachIndexed { i, e ->
-                                val y = slot * (barPx + bGapPx)
-                                if (e.appWidgetId == rearrangeDragId) {
-                                    // [n] = placeholder at the insert slot.
-                                    placeables[n].place(0, y)
-                                } else {
-                                    placeables[i].place(0, y)
-                                }
-                                slot++
-                            }
-                            val ghostY = (fingerLocal.y - barPx / 2f)
-                                .roundToInt()
-                                .coerceIn(
-                                    0,
-                                    (n * (barPx + bGapPx) - barPx)
-                                        .coerceAtLeast(0),
-                                )
-                            placeables[n + 1].place(0, ghostY, zIndex = 2f)
-                        }
-                    } else {
                     val gapPx = gridGap.roundToPx()
                     val cellWPx = cellW.roundToPx()
                     val cellHPx = cellHeight.roundToPx()
                     val positions: List<GridPos> = flowLayout(layoutSpans)
+                    val n = orderedWidgets.size
+                    val dragIdx = orderedWidgets.indexOfFirst {
+                        it.appWidgetId == movingId
+                    }
                     val placeables = measurables.mapIndexed { i, m ->
-                        val s = layoutSpans[i]
+                        // Children [0, n) = cells; [n] = the move placeholder.
+                        val s = if (i < n) layoutSpans[i] else layoutSpans[dragIdx]
                         m.measure(
                             Constraints.fixed(
                                 s.cols * cellWPx + (s.cols - 1) * gapPx,
@@ -475,12 +474,33 @@ fun WidgetsScreen(
                         else usedRows * cellHPx + (usedRows - 1) * gapPx
                     layout(constraints.maxWidth, totalH) {
                         placeables.forEachIndexed { i, p ->
-                            p.place(
-                                positions[i].col * (cellWPx + gapPx),
-                                positions[i].row * (cellHPx + gapPx),
-                            )
+                            if (i == n) {
+                                // Placeholder: the dragged widget's slot in
+                                // the live order.
+                                p.place(
+                                    positions[dragIdx].col * (cellWPx + gapPx),
+                                    positions[dragIdx].row * (cellHPx + gapPx),
+                                )
+                            } else if (i == dragIdx && movingId != null) {
+                                // The real widget follows the finger.
+                                val fx = fingerRaw.x - gridScreenPos.x -
+                                    grabOffset.x
+                                val fy = fingerRaw.y - gridScreenPos.y -
+                                    grabOffset.y
+                                p.place(
+                                    fx.roundToInt().coerceIn(
+                                        0, constraints.maxWidth - p.width,
+                                    ),
+                                    fy.roundToInt().coerceAtLeast(0),
+                                    zIndex = 2f,
+                                )
+                            } else {
+                                p.place(
+                                    positions[i].col * (cellWPx + gapPx),
+                                    positions[i].row * (cellHPx + gapPx),
+                                )
+                            }
                         }
-                    }
                     }
                 }
             }
@@ -588,8 +608,9 @@ private fun effectiveSpan(
 private fun WidgetCell(
     entry: WidgetEntry,
     info: AppWidgetProviderInfo?,
-    resizing: Boolean,
-    rearranging: Boolean,
+    editing: Boolean,
+    movingThis: Boolean,
+    contentBlur: Boolean,
     dragging: Boolean,
     cellW: Dp,
     controller: WidgetController,
@@ -597,10 +618,9 @@ private fun WidgetCell(
     menuOpen: Boolean,
     onMenuOpen: () -> Unit,
     onMenuDismiss: () -> Unit,
-    onResize: () -> Unit,
     onRename: () -> Unit,
     onRemove: () -> Unit,
-    onDragStart: () -> Unit,
+    onDragStart: (downRawX: Float, downRawY: Float) -> Unit,
     onDragMove: (Float, Float) -> Unit,
     onDragEnd: (Boolean) -> Unit,
     onPreviewSpan: (GridSpan) -> Unit,
@@ -617,7 +637,6 @@ private fun WidgetCell(
         info.resizeMode and AppWidgetProviderInfo.RESIZE_HORIZONTAL != 0
     val verticalResizable = info == null ||
         info.resizeMode and AppWidgetProviderInfo.RESIZE_VERTICAL != 0
-    val resizable = horizontalResizable || verticalResizable
     // Stored span is the drag base; fall back to the provider's default.
     val baseSpan = effectiveSpan(entry, info, density.density, cellW)
     val minCols = info?.let { pxToCells(it.minResizeWidth, density.density, cellW.value) }
@@ -654,12 +673,26 @@ private fun WidgetCell(
         original = baseSpan,
     )
 
-    Box(Modifier.fillMaxSize()) {
+    Box(
+        // While this widget is being moved it floats under the finger,
+        // slightly transparent and dimmed (the resize look).
+        Modifier
+            .fillMaxSize()
+            .then(if (movingThis) Modifier.graphicsLayer { alpha = 0.7f } else Modifier)
+            // Neighbours dim while a widget is edited (OxygenOS look);
+            // Modifier.blur does not propagate into AndroidView content.
+            .then(
+                if (contentBlur) {
+                    Modifier
+                        .blur(16.dp)
+                        .graphicsLayer { alpha = 0.4f }
+                } else {
+                    Modifier
+                }
+            ),
+    ) {
         Column(Modifier.fillMaxSize()) {
-            if (rearranging) {
-                val (label, icon) = barVisual(entry, info)
-                WidgetBar(label = label, icon = icon, ghost = false)
-            } else if (entry.title.isNotEmpty()) {
+            if (entry.title.isNotEmpty()) {
                 Text(
                     text = entry.title.uppercase(),
                     color = LocalAviateColors.current.homeText,
@@ -671,13 +704,7 @@ private fun WidgetCell(
                     modifier = Modifier.height(titleHeight),
                 )
             }
-            Box(
-                // Rearrange keeps the same AndroidView composed at 1dp (not
-                // 0: a 0-size AndroidView detaches from the window, which
-                // kills an in-flight drag stream and forces re-inflation).
-                if (rearranging) Modifier.size(1.dp)
-                else Modifier.weight(1f).fillMaxWidth(),
-            ) {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
                 AndroidView(
                     factory = { ctx ->
                         val view = controller.createView(entry)
@@ -690,19 +717,21 @@ private fun WidgetCell(
                     // would freeze the lambdas from first composition).
                     update = { view ->
                         (view as? LongPressAppWidgetHostView)?.let { v ->
+                            v.editMode = editing
                             v.onLongPress = onMenuOpen
                             v.onDragStart = onDragStart
                             v.onDragMove = onDragMove
                             v.onDragEnd = onDragEnd
                         }
+                        // Compose blur/alpha don't reach AndroidView content;
+                        // dim the view itself while a sibling is edited.
+                        view.alpha = if (contentBlur) 0.4f else 1f
                     },
                     modifier = Modifier
                         .fillMaxSize()
                         .onSizeChanged { size ->
                             // Report once per size; the widget then picks the
-                            // matching responsive layout. Skip while collapsed
-                            // so providers don't get a 0-size update.
-                            if (rearranging) return@onSizeChanged
+                            // matching responsive layout.
                             val view = hostView ?: return@onSizeChanged
                             if (reportedSize == size) return@onSizeChanged
                             reportedSize = size
@@ -729,54 +758,85 @@ private fun WidgetCell(
                             }
                         },
                 )
-                // Resize affordance: blue frame + translucent preview tint
-                // while a handle is being dragged.
-                if (resizing) {
+                // A bit darker while floating under the finger.
+                if (movingThis) {
                     Box(
                         Modifier
                             .matchParentSize()
-                            .border(2.dp, AviateBlue)
+                            .clip(editShape)
+                            .background(Color.Black.copy(alpha = 0.25f)),
+                    )
+                }
+                // Edit affordance: rounded white frame + translucent tint
+                // while a handle is being dragged.
+                if (editing) {
+                    Box(
+                        Modifier
+                            .matchParentSize()
+                            .border(
+                                1.5.dp,
+                                Color.White.copy(alpha = 0.6f),
+                                editShape,
+                            )
                             .then(
                                 if (dragging) {
-                                    Modifier.background(
-                                        AviateBlue.copy(alpha = 0.25f)
-                                    )
+                                    Modifier
+                                        .clip(editShape)
+                                        .background(
+                                            Color.White.copy(alpha = 0.10f)
+                                        )
                                 } else {
                                     Modifier
                                 }
                             ),
                     )
                 }
+                val menuContent =
+                    if (LocalIsDark.current) Color.White else Color(0xFF1C1C1C)
                 DropdownMenu(
                     expanded = menuOpen,
                     onDismissRequest = onMenuDismiss,
+                    shape = RoundedCornerShape(16.dp),
+                    containerColor = if (LocalIsDark.current) {
+                        Color(0xFF2F2F2F)
+                    } else {
+                        Color(0xFFF2F2F2)
+                    },
+                    shadowElevation = 8.dp,
+                    modifier = Modifier.widthIn(min = 260.dp),
                 ) {
                     DropdownMenuItem(
                         text = {
-                            Column {
-                                Text(stringResource(R.string.widget_resize))
-                                if (!resizable) {
-                                    Text(
-                                        stringResource(R.string.widget_cannot_resize),
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme
-                                            .onSurfaceVariant,
-                                    )
-                                }
-                            }
+                            Text(
+                                stringResource(R.string.widget_rename),
+                                color = menuContent,
+                            )
                         },
-                        enabled = resizable,
-                        onClick = onResize,
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.widget_rename)) },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Outlined.Edit,
+                                contentDescription = null,
+                                tint = menuContent,
+                            )
+                        },
                         onClick = onRename,
+                    )
+                    HorizontalDivider(
+                        color = menuContent.copy(alpha = 0.12f),
+                        modifier = Modifier.padding(start = 56.dp),
                     )
                     DropdownMenuItem(
                         text = {
                             Text(
                                 stringResource(R.string.remove_widget),
-                                color = AviateOrange,
+                                color = menuContent,
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Outlined.HighlightOff,
+                                contentDescription = null,
+                                tint = menuContent,
                             )
                         },
                         onClick = onRemove,
@@ -785,51 +845,40 @@ private fun WidgetCell(
             }
         }
 
-        if (resizing) {
-            // Edge handles: 48dp touch target, 20dp white dot ringed blue.
-            if (horizontalResizable) {
-                ResizeHandle(
-                    modifier = Modifier.align(Alignment.CenterEnd),
-                    onPreview = { acc ->
-                        onPreviewSpan(dragSpan(acc, cols = true, rows = false))
-                    },
-                    onDraggingChange = onDraggingChange,
-                    onDone = { acc ->
-                        onResizeDone(dragSpan(acc, cols = true, rows = false))
-                    },
-                )
-            }
-            if (verticalResizable) {
-                ResizeHandle(
-                    modifier = Modifier.align(Alignment.BottomCenter),
-                    onPreview = { acc ->
-                        onPreviewSpan(dragSpan(acc, cols = false, rows = true))
-                    },
-                    onDraggingChange = onDraggingChange,
-                    onDone = { acc ->
-                        onResizeDone(dragSpan(acc, cols = false, rows = true))
-                    },
-                )
-            }
-            if (horizontalResizable && verticalResizable) {
-                ResizeHandle(
-                    modifier = Modifier.align(Alignment.BottomEnd),
-                    onPreview = { acc ->
-                        onPreviewSpan(dragSpan(acc, cols = true, rows = true))
-                    },
-                    onDraggingChange = onDraggingChange,
-                    onDone = { acc ->
-                        onResizeDone(dragSpan(acc, cols = true, rows = true))
-                    },
-                )
-            }
+        if (editing && (horizontalResizable || verticalResizable)) {
+            // One corner arc resizing both axes at once (OxygenOS style).
+            CornerResizeHandle(
+                modifier = Modifier.align(Alignment.BottomEnd),
+                onPreview = { acc ->
+                    onPreviewSpan(
+                        dragSpan(
+                            acc,
+                            cols = horizontalResizable,
+                            rows = verticalResizable,
+                        )
+                    )
+                },
+                onDraggingChange = onDraggingChange,
+                onDone = { acc ->
+                    onResizeDone(
+                        dragSpan(
+                            acc,
+                            cols = horizontalResizable,
+                            rows = verticalResizable,
+                        )
+                    )
+                },
+            )
         }
     }
 }
 
-/** 48dp touch target with a 20dp white dot ringed in Aviate blue. */
+/**
+ * 48dp touch target drawing a white 90° arc hugging the frame's bottom-right
+ * corner (OxygenOS style): 4dp round-cap stroke at the edit corner radius.
+ */
 @Composable
-private fun ResizeHandle(
+private fun CornerResizeHandle(
     modifier: Modifier,
     onPreview: (Offset) -> Unit,
     onDraggingChange: (Boolean) -> Unit,
@@ -863,78 +912,24 @@ private fun ResizeHandle(
                     },
                 )
             },
-        contentAlignment = Alignment.Center,
+        contentAlignment = Alignment.BottomEnd,
     ) {
-        Box(
-            Modifier
-                .size(20.dp)
-                .background(Color.White, CircleShape)
-                .border(2.dp, AviateBlue, CircleShape),
-        )
-    }
-}
-
-/** Label + provider icon for a widget's rearrange bar. */
-@Composable
-private fun barVisual(
-    entry: WidgetEntry,
-    info: AppWidgetProviderInfo?,
-): Pair<String, ImageBitmap?> {
-    val ctx = LocalContext.current
-    val label = entry.title.ifEmpty {
-        info?.loadLabel(ctx.packageManager)
-            ?: entry.providerClass.substringAfterLast('.')
-    }
-    val icon = remember(entry.appWidgetId, info) {
-        runCatching {
-            info?.loadIcon(ctx, ctx.resources.displayMetrics.densityDpi)
-                ?.toImageBitmap(48)
-        }.getOrNull()
-    }
-    return label to icon
-}
-
-/** Compact title bar a widget collapses to while rearranging. */
-@Composable
-private fun WidgetBar(label: String, icon: ImageBitmap?, ghost: Boolean) {
-    // Mirrors the collapsed category card and its drag ghost.
-    val aviate = LocalAviateColors.current
-    val shape = RoundedCornerShape(2.dp)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .height(barHeight)
-            .then(if (ghost) Modifier.shadow(8.dp, shape) else Modifier)
-            .clip(shape)
-            .background(
-                if (ghost) {
-                    // Opaque, or the elevation shadow shows through.
-                    aviate.cardBackground.compositeOver(
-                        if (LocalIsDark.current) Color(0xFF252628) else Color.White
-                    )
-                } else {
-                    aviate.cardBackground
-                }
+        Canvas(Modifier.size(24.dp)) {
+            // Arc around the bottom-right corner, on the frame's curve.
+            val r = editCorner.toPx() + 2.dp.toPx()
+            drawArc(
+                color = Color.White,
+                startAngle = 0f,
+                sweepAngle = 90f,
+                useCenter = false,
+                topLeft = Offset(
+                    size.width - r * 2f,
+                    size.height - r * 2f,
+                ),
+                size = Size(r * 2f, r * 2f),
+                style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round),
             )
-            .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (icon != null) {
-            Image(
-                bitmap = icon,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-            )
-            Spacer(Modifier.size(14.dp))
         }
-        Text(
-            text = label.uppercase(),
-            color = aviate.cardTitle,
-            fontSize = 12.sp,
-            fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-            letterSpacing = 1.5.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
+

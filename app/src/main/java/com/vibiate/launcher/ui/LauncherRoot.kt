@@ -1,6 +1,13 @@
 package com.vibiate.launcher.ui
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.os.Build
+import android.view.WindowManager
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -15,6 +22,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -31,6 +39,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -146,7 +155,16 @@ fun LauncherRoot(
     }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showCustomize by rememberSaveable { mutableStateOf(false) }
-    var widgetEditing by remember { mutableStateOf(false) }
+    // Each composed page reports editing independently — adjacent pages
+    // would otherwise overwrite each other's onEditingChange(false).
+    val widgetEditingByPage = remember { mutableStateMapOf<Int, Boolean>() }
+    val widgetEditing = widgetEditingByPage.values.any { it }
+    // OxygenOS-style backdrop blur while a widget is edited/moved.
+    val editBlur by animateFloatAsState(
+        targetValue = if (widgetEditing) 1f else 0f,
+        animationSpec = tween(200),
+        label = "editBlur",
+    )
 
     // Removing a space shrinks the pager; keep currentPage within bounds.
     LaunchedEffect(pagerState.pageCount) {
@@ -212,9 +230,49 @@ fun LauncherRoot(
             else -> (1f - (pagerPos - LauncherTab.ALL_APPS.ordinal)).coerceIn(0f, 1f)
         }
 
-        // Cross-window blur plumbed via FLAG_BLUR_BEHIND reached SurfaceFlinger
-        // (dim layer, backgroundBlurRadius) but the wallpaper never visibly
-        // blurred on the emulator — the stronger skrim stands in for it.
+        // Cross-window wallpaper blur while editing (API 31+). The window
+        // needs a transparent background drawable for the blur to show.
+        val window = remember {
+            var c: Context? = context
+            while (c is ContextWrapper && c !is Activity) c = c.baseContext
+            (c as? Activity)?.window
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val windowManager = remember {
+                context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            }
+            var blurEnabled by remember {
+                mutableStateOf(windowManager.isCrossWindowBlurEnabled)
+            }
+            DisposableEffect(windowManager) {
+                val listener = java.util.function.Consumer<Boolean> {
+                    blurEnabled = it
+                }
+                windowManager.addCrossWindowBlurEnabledListener(listener)
+                blurEnabled = windowManager.isCrossWindowBlurEnabled
+                onDispose {
+                    windowManager.removeCrossWindowBlurEnabledListener(listener)
+                }
+            }
+            LaunchedEffect(editBlur, blurEnabled) {
+                window?.let { w ->
+                    if (blurEnabled && editBlur > 0f) {
+                        w.setBackgroundDrawable(
+                            android.graphics.drawable.ColorDrawable(
+                                android.graphics.Color.TRANSPARENT
+                            )
+                        )
+                        w.setBackgroundBlurRadius((60f * editBlur).toInt())
+                    } else {
+                        w.setBackgroundBlurRadius(0)
+                    }
+                }
+            }
+        }
+
+        // Collections/A–Z use a strong skrim instead of a wallpaper blur.
+        // (Window background blur only works with windowIsTranslucent, which
+        // the edit-mode blur above relies on.)
         val skrimColor = aviate.pageSkrimStrong
             .copy(alpha = aviate.pageSkrimStrong.alpha * backdropFraction)
 
@@ -241,7 +299,17 @@ fun LauncherRoot(
                         ),
                     ),
             )
+            // Dim scrim over the wallpaper while editing; launcher chrome is
+            // blurred per-sibling so the selected widget stays sharp.
+            if (editBlur > 0f) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.35f * editBlur)),
+                )
+            }
             Column(Modifier.fillMaxSize()) {
+                Box(Modifier.blur(16.dp * editBlur)) {
                 LauncherTopBar(
                     // Custom/add pages and settings: underline nothing.
                     activeTab = pagerState.currentPage
@@ -253,6 +321,7 @@ fun LauncherRoot(
                     },
                     onSettingsClick = { showSettings = true },
                 )
+                }
                 // Long-press on empty space anywhere opens the customize sheet.
                 // Icons/widgets consume their own long-presses first (Main pass
                 // runs child-to-parent), so only unhandled gaps reach this.
@@ -300,12 +369,18 @@ fun LauncherRoot(
                                     LauncherTab.HOME -> HomeScreen(
                                         settings = settings,
                                         controller = widgetController,
-                                        onEditingChange = { widgetEditing = it },
+                                        editBlur = editBlur,
+                                        onEditingChange = {
+                                            widgetEditingByPage[page] = it
+                                        },
                                     )
                                     LauncherTab.WIDGETS -> WidgetsScreen(
                                         controller = widgetController,
                                         screenId = 0,
-                                        onEditingChange = { widgetEditing = it },
+                                        editBlur = editBlur,
+                                        onEditingChange = {
+                                            widgetEditingByPage[page] = it
+                                        },
                                     )
                                     LauncherTab.COLLECTIONS -> CollectionsScreen(
                                         repository = appRepository,
@@ -345,7 +420,10 @@ fun LauncherRoot(
                                         controller = widgetController,
                                         screenId = screen.id,
                                         screenName = screen.name,
-                                        onEditingChange = { widgetEditing = it },
+                                        editBlur = editBlur,
+                                        onEditingChange = {
+                                            widgetEditingByPage[page] = it
+                                        },
                                         onRemoveScreen = {
                                             widgetController.removeScreen(screen.id)
                                         },
@@ -364,7 +442,12 @@ fun LauncherRoot(
                 }
                 // Dock persists under all pager pages; hidden while settings is open.
                 if (!showSettings) {
-                    LauncherDock(repository = dockRepository, iconTheme = iconTheme)
+                    Box(Modifier.blur(16.dp * editBlur)) {
+                        LauncherDock(
+                            repository = dockRepository,
+                            iconTheme = iconTheme,
+                        )
+                    }
                 }
             }
         }

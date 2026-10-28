@@ -253,3 +253,67 @@ class DefaultHomeWidgetsTest {
         assertEquals(listOf("p/A", "p/D"), r.map { it.first })
     }
 }
+
+class DragReorderTest {
+    // Three 1x1 rects stacked vertically, 100px each with 10px gaps.
+    private val rects = listOf(
+        GridRect(0, 0, 100, 100),
+        GridRect(0, 110, 100, 210),
+        GridRect(0, 220, 100, 320),
+    )
+    private val order = listOf(1, 2, 3)
+    private val bottom = 320
+
+    @Test
+    fun `hitting another widget centre moves dragged to that index`() {
+        // Drag id 3 over rect[0]'s centre.
+        assertEquals(
+            listOf(3, 1, 2),
+            dragReorder(order, rects, 3, 50, 50, bottom),
+        )
+    }
+
+    @Test
+    fun `finger inside dragged widget own slot is unchanged`() {
+        assertEquals(order, dragReorder(order, rects, 2, 50, 160, bottom))
+    }
+
+    @Test
+    fun `edge margin is ignored`() {
+        // 2% inside rect[0]'s top edge — within the 15% hysteresis margin.
+        assertEquals(order, dragReorder(order, rects, 3, 50, 2, bottom))
+    }
+
+    @Test
+    fun `below content bottom moves to end`() {
+        assertEquals(
+            listOf(2, 3, 1),
+            dragReorder(order, rects, 1, 50, 400, bottom),
+        )
+    }
+
+    @Test
+    fun `already last below bottom is unchanged`() {
+        assertEquals(order, dragReorder(order, rects, 3, 50, 400, bottom))
+    }
+
+    @Test
+    fun `mixed layout tall over short neighbour`() {
+        // 4x2 at top (tall), then two 2x1 side by side.
+        val spans = listOf(GridSpan(4, 2), GridSpan(2, 1), GridSpan(2, 1))
+        val cellW = 100; val cellH = 100; val gap = 10
+        val positions = flowLayout(spans)
+        val rects = spans.mapIndexed { i, s ->
+            val p = positions[i]
+            val l = p.col * (cellW + gap); val t = p.row * (cellH + gap)
+            GridRect(l, t, l + s.cols * cellW + (s.cols - 1) * gap,
+                     t + s.rows * cellH + (s.rows - 1) * gap)
+        }
+        // Drag the tall 4x2 (id 1) over the second 2x1 (id 3) -> index 2.
+        assertEquals(
+            listOf(2, 3, 1),
+            dragReorder(listOf(1, 2, 3), rects, 1,
+                        3 * cellW, 2 * cellH + gap + cellH / 2, rects.last().bottom),
+        )
+    }
+}

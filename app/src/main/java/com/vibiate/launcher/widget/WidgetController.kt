@@ -198,9 +198,16 @@ class LauncherAppWidgetHost(context: Context, hostId: Int) : AppWidgetHost(conte
 class LongPressAppWidgetHostView(context: Context) : AppWidgetHostView(context) {
 
     var onLongPress: (() -> Unit)? = null
-    var onDragStart: (() -> Unit)? = null
+    var onDragStart: ((downRawX: Float, downRawY: Float) -> Unit)? = null
     var onDragMove: ((rawX: Float, rawY: Float) -> Unit)? = null
     var onDragEnd: ((cancelled: Boolean) -> Unit)? = null
+
+    /**
+     * Edit mode: this widget is selected for editing. The view intercepts
+     * every gesture from ACTION_DOWN (the widget's own clicks never fire)
+     * and a body drag starts immediately past touch slop — no long-press.
+     */
+    var editMode = false
 
     private var downX = 0f
     private var downY = 0f
@@ -224,6 +231,9 @@ class LongPressAppWidgetHostView(context: Context) : AppWidgetHostView(context) 
                 downX = ev.rawX
                 downY = ev.rawY
                 postDelayed(longPressCheck, ViewConfiguration.getLongPressTimeout().toLong())
+                // In edit mode the parent (pager/scroll) must never grab a
+                // move that could start a body drag.
+                if (editMode) parent?.requestDisallowInterceptTouchEvent(true)
             }
             MotionEvent.ACTION_MOVE -> {
                 if (!longPressFired &&
@@ -236,14 +246,16 @@ class LongPressAppWidgetHostView(context: Context) : AppWidgetHostView(context) 
                 removeCallbacks(longPressCheck)
         }
         // Once the long-press fired, take over the gesture: framework
-        // dispatches ACTION_CANCEL to the child that had it.
-        return longPressFired || super.onInterceptTouchEvent(ev)
+        // dispatches ACTION_CANCEL to the child that had it. In edit mode we
+        // take every gesture so widget clicks can't fire.
+        return longPressFired || editMode || super.onInterceptTouchEvent(ev)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (longPressFired) {
-            // The long-press already fired; movement past slop turns the
-            // gesture into a widget drag that Compose mirrors in raw coords.
+        if (longPressFired || editMode) {
+            // Movement past slop turns the gesture into a widget drag that
+            // Compose mirrors in raw coords — after a long-press anywhere,
+            // or immediately in edit mode.
             when (event.actionMasked) {
                 MotionEvent.ACTION_MOVE -> {
                     if (!dragActive &&
@@ -251,8 +263,9 @@ class LongPressAppWidgetHostView(context: Context) : AppWidgetHostView(context) 
                             abs(event.rawY - downY) > slop)
                     ) {
                         dragActive = true
+                        removeCallbacks(longPressCheck)
                         parent?.requestDisallowInterceptTouchEvent(true)
-                        onDragStart?.invoke()
+                        onDragStart?.invoke(downX, downY)
                     }
                     if (dragActive) onDragMove?.invoke(event.rawX, event.rawY)
                 }

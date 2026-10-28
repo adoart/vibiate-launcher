@@ -105,6 +105,30 @@ fun hitIndex(rects: List<GridRect>, x: Int, y: Int): Int? =
             y >= r.top + my && y <= r.bottom - my
     }.takeIf { it >= 0 }
 
+/**
+ * Order after the dragged widget is held at ([x], [y]); [rects] are the
+ * current layout rects parallel to [order]. Hitting another widget's inner
+ * area moves the dragged one to that index; below [contentBottom] moves it
+ * to the end; otherwise unchanged.
+ */
+fun dragReorder(
+    order: List<Int>,
+    rects: List<GridRect>,
+    dragId: Int,
+    x: Int,
+    y: Int,
+    contentBottom: Int,
+): List<Int> {
+    val cur = order.indexOf(dragId)
+    if (cur < 0) return order
+    val hit = hitIndex(rects, x, y)
+    return when {
+        hit != null && hit != cur -> order.moved(cur, hit)
+        y > contentBottom -> order.moved(cur, order.size - 1)
+        else -> order
+    }
+}
+
 /** Move the element at [from] to [to]; unchanged list for invalid indices. */
 fun <T> List<T>.moved(from: Int, to: Int): List<T> {
     if (from !in indices || from == to) return this
