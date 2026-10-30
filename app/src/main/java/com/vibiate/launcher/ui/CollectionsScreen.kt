@@ -46,6 +46,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -60,6 +61,7 @@ import com.vibiate.launcher.data.IconPackManager
 import com.vibiate.launcher.data.IconTheme
 import com.vibiate.launcher.data.SettingsRepository
 import com.vibiate.launcher.data.UserCategory
+import com.vibiate.launcher.data.dockKey
 import com.vibiate.launcher.data.buildCollections
 import com.vibiate.launcher.ui.components.AddAppsDialog
 import com.vibiate.launcher.ui.components.AviateSearchBar
@@ -87,6 +89,7 @@ fun CollectionsScreen(
     iconTheme: IconTheme?,
     iconPackManager: IconPackManager,
     gridSize: Int,
+    isCurrentPage: Boolean = true,
     onLaunch: (AppEntry) -> Unit,
     /** Tap on the Aviate search bar: hop to the A–Z page and focus its field. */
     onSearchClick: () -> Unit = {},
@@ -138,14 +141,27 @@ fun CollectionsScreen(
     val preview by derivedStateOf {
         val p = drag.payload
         val pt = drag.pointer
-        when (p) {
-            is DragPayload.App -> {
-                val ck = p.app.componentKey
+        // A dock icon or page shortcut drops like the app it resolves to
+        // (copy semantics — the icon stays where it came from).
+        val app: AppEntry? = when (p) {
+            is DragPayload.App -> p.app
+            is DragPayload.Dock -> p.entry.component?.let { cn ->
+                apps.firstOrNull { it.componentKey == dockKey(cn) }
+            }
+            is DragPayload.Shortcut -> p.app
+            else -> null
+        }
+        when {
+            app != null -> {
+                val ck = app.componentKey
                 // Exact slot under the finger wins; otherwise the card as a
                 // whole gets the drop appended (or pinned to the last visible
-                // collapsed slot).
+                // collapsed slot). Not over the dock — it owns that drop.
                 var hoverKey: String? = null
                 var hoverIndex = -1
+                val overDock = drag.rects["dock"]?.contains(pt) == true ||
+                    drag.rects["dock_remove"]?.contains(pt) == true
+                if (!overDock) {
                 for ((id, rect) in drag.rects) {
                     if (id is SlotId && rect.contains(pt)) {
                         hoverKey = id.key
@@ -169,6 +185,7 @@ fun CollectionsScreen(
                         }
                     }
                 }
+                }
                 var dropTarget: Pair<String, List<String>>? = null
                 val rows = collections.map { (def, catApps) ->
                     val filtered = catApps
@@ -187,7 +204,7 @@ fun CollectionsScreen(
                 }
                 DragPreview(rows, appDrop = dropTarget)
             }
-            is DragPayload.Category -> {
+            p is DragPayload.Category -> {
                 val draggedKey = p.def.key
                 // Insert position = number of real cards above the finger.
                 // The dragged card itself stays rendered (compact + dimmed):
@@ -227,32 +244,68 @@ fun CollectionsScreen(
             )
         }
     }
-    val isAppDrag = drag.payload is DragPayload.App
+    val isAppDrag = drag.payload is DragPayload.App ||
+        drag.payload is DragPayload.Shortcut ||
+        (drag.payload as? DragPayload.Dock)?.entry?.component?.let { cn ->
+            apps.any { it.componentKey == dockKey(cn) }
+        } == true
     val isCategoryDrag = drag.payload is DragPayload.Category
     val draggedCategoryKey = (drag.payload as? DragPayload.Category)?.def?.key
 
     // ---- Drop commit ----
+    // Zone handler: only while Collections is the current page and the
+    // pointer is over it — the dock/remove zones win when they're hit.
     val latestPreview by rememberUpdatedState(preview)
+    val latestCurrent by rememberUpdatedState(isCurrentPage)
+    val latestApps by rememberUpdatedState(apps)
     DisposableEffect(drag) {
-        val handler: (DragPayload) -> Unit = { payload ->
-            when (payload) {
-                is DragPayload.App -> latestPreview.appDrop?.let { (key, order) ->
-                    scope.launch {
-                        settings.applyAppDrop(
-                            componentKey = payload.app.componentKey,
-                            autoKey = payload.app.category.name,
-                            targetKey = key,
-                            targetOrder = order,
-                        )
+        val handler: (DragPayload, Offset) -> Boolean = { payload, pt ->
+            if (!latestCurrent || drag.rects["collections_list"]?.contains(pt) != true) {
+                false
+            } else {
+                // A dock icon drops like the app it resolves to (copy
+                // semantics — it stays in the dock).
+                val app: AppEntry? = when (payload) {
+                    is DragPayload.App -> payload.app
+                    is DragPayload.Dock -> payload.entry.component?.let { cn ->
+                        latestApps.firstOrNull {
+                            it.componentKey == dockKey(cn)
+                        }
                     }
+                    is DragPayload.Shortcut -> payload.app
+                    else -> null
                 }
-                is DragPayload.Category -> latestPreview.categoryDropOrder?.let { order ->
-                    scope.launch { settings.setCategoryOrder(order) }
+                when {
+                    app != null -> {
+                        val drop = latestPreview.appDrop
+                        if (drop == null) false else {
+                            val (key, order) = drop
+                            scope.launch {
+                                settings.applyAppDrop(
+                                    componentKey = app.componentKey,
+                                    autoKey = app.category.name,
+                                    targetKey = key,
+                                    targetOrder = order,
+                                )
+                            }
+                            true
+                        }
+                    }
+                    payload is DragPayload.Category -> {
+                        val order = latestPreview.categoryDropOrder
+                        if (order == null) false else {
+                            scope.launch { settings.setCategoryOrder(order) }
+                            true
+                        }
+                    }
+                    else -> false
                 }
             }
         }
-        drag.dropHandler = handler
-        onDispose { if (drag.dropHandler === handler) drag.dropHandler = null }
+        drag.dropHandlers["collections"] = handler
+        onDispose { if (drag.dropHandlers["collections"] === handler) {
+            drag.dropHandlers.remove("collections")
+        } }
     }
 
     // ---- Edge auto-scroll while dragging ----

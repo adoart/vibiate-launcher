@@ -27,6 +27,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.HighlightOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -49,9 +51,13 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -63,6 +69,7 @@ import com.vibiate.launcher.R
 import com.vibiate.launcher.data.AppEntry
 import com.vibiate.launcher.data.AppRepository
 import com.vibiate.launcher.data.DockRepository
+import com.vibiate.launcher.data.dockRemove
 import com.vibiate.launcher.data.HOME_SCREEN_ID
 import com.vibiate.launcher.data.IconPackManager
 import com.vibiate.launcher.data.IconTheme
@@ -77,6 +84,8 @@ import com.vibiate.launcher.ui.components.toImageBitmap
 import com.vibiate.launcher.ui.drag.DragDropState
 import com.vibiate.launcher.ui.drag.DragPayload
 import com.vibiate.launcher.ui.drag.LocalDragDrop
+import com.vibiate.launcher.ui.drag.trackBounds
+import com.vibiate.launcher.ui.theme.AviateOrange
 import com.vibiate.launcher.ui.theme.LocalAviateColors
 import com.vibiate.launcher.ui.theme.VibiateTheme
 import com.vibiate.launcher.widget.WidgetController
@@ -145,6 +154,7 @@ fun LauncherRoot(
 
     // Shared drag session: one for every page + the root-level ghost.
     val drag = remember { DragDropState() }
+    val pageApps by appRepository.apps.collectAsState()
 
     // Pages: built-in tabs (ordinal order: HOME, WIDGETS, COLLECTIONS, ALL_APPS),
     // then custom widget spaces, then a trailing "Add space" page.
@@ -281,7 +291,33 @@ fun LauncherRoot(
             Modifier.fillMaxSize(),
             color = Color.Transparent,
         ) {
-        Box(Modifier.fillMaxSize()) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                // Root drag observer: keeps feeding pointer moves and
+                // resolves drop/cancel even after the drag-source node is
+                // disposed (e.g. the A–Z page while flipping pages).
+                .pointerInput(drag) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            if (!drag.isDragging) continue
+                            val ch = event.changes.firstOrNull {
+                                it.pressed || it.previousPressed
+                            } ?: continue
+                            when {
+                                // Commit only real drags: a no-move release
+                                // is the source's long-press menu, not a drop.
+                                ch.changedToUp() -> if (drag.movedPastSlop) {
+                                    drag.drop()
+                                }
+                                !ch.pressed -> drag.cancel()
+                                else -> drag.moveTo(ch.position)
+                            }
+                        }
+                    }
+                },
+        ) {
             // "Blurred" Aviate backdrop under Collections/A–Z.
             Box(
                 Modifier
@@ -360,15 +396,27 @@ fun LauncherRoot(
                             modifier = Modifier.fillMaxSize(),
                             userScrollEnabled = !drag.isDragging && !widgetEditing,
                             // Keep the drag-source page (e.g. A–Z) composed while
-                            // the pager animates to Collections mid-drag, or its
-                            // gesture coroutine is cancelled.
-                            beyondViewportPageCount = 1,
+                            // edge-flipping mid-drag: the synthesized cancel on
+                            // disposal would reach the root observer and kill
+                            // the drag, so compose every page while dragging.
+                            beyondViewportPageCount =
+                                if (drag.isDragging) pagerState.pageCount else 1,
                         ) { page ->
                             when {
                                 page < builtInCount -> when (LauncherTab.entries[page]) {
                                     LauncherTab.HOME -> HomeScreen(
                                         settings = settings,
                                         controller = widgetController,
+                                        apps = pageApps,
+                                        iconTheme = iconTheme,
+                                        onLaunch = ::launch,
+                                        isCurrentPage =
+                                            pagerState.currentPage == page,
+                                        onDockRemove = { key ->
+                                            dockRepository.edit {
+                                                dockRemove(it, key)
+                                            }
+                                        },
                                         editBlur = editBlur,
                                         onEditingChange = {
                                             widgetEditingByPage[page] = it
@@ -377,6 +425,16 @@ fun LauncherRoot(
                                     LauncherTab.WIDGETS -> WidgetsScreen(
                                         controller = widgetController,
                                         screenId = 0,
+                                        apps = pageApps,
+                                        iconTheme = iconTheme,
+                                        onLaunch = ::launch,
+                                        isCurrentPage =
+                                            pagerState.currentPage == page,
+                                        onDockRemove = { key ->
+                                            dockRepository.edit {
+                                                dockRemove(it, key)
+                                            }
+                                        },
                                         editBlur = editBlur,
                                         onEditingChange = {
                                             widgetEditingByPage[page] = it
@@ -388,6 +446,7 @@ fun LauncherRoot(
                                         iconTheme = iconTheme,
                                         iconPackManager = iconPackManager,
                                         gridSize = gridSize,
+                                        isCurrentPage = pagerState.currentPage == page,
                                         onLaunch = ::launch,
                                         onSearchClick = {
                                             scope.launch {
@@ -405,13 +464,6 @@ fun LauncherRoot(
                                         iconTheme = iconTheme,
                                         onLaunch = ::launch,
                                         focusRequests = azSearchFocus,
-                                        onDragToCollections = {
-                                            scope.launch {
-                                                pagerState.animateScrollToPage(
-                                                    LauncherTab.COLLECTIONS.ordinal,
-                                                )
-                                            }
-                                        },
                                     )
                                 }
                                 page < builtInCount + customScreens.size -> {
@@ -420,6 +472,16 @@ fun LauncherRoot(
                                         controller = widgetController,
                                         screenId = screen.id,
                                         screenName = screen.name,
+                                        apps = pageApps,
+                                        iconTheme = iconTheme,
+                                        onLaunch = ::launch,
+                                        isCurrentPage =
+                                            pagerState.currentPage == page,
+                                        onDockRemove = { key ->
+                                            dockRepository.edit {
+                                                dockRemove(it, key)
+                                            }
+                                        },
                                         editBlur = editBlur,
                                         onEditingChange = {
                                             widgetEditingByPage[page] = it
@@ -446,6 +508,55 @@ fun LauncherRoot(
                         LauncherDock(
                             repository = dockRepository,
                             iconTheme = iconTheme,
+                            onShortcutDocked = {
+                                widgetController.removeShortcut(it)
+                            },
+                        )
+                    }
+                }
+            }
+
+            // Remove zone while a dock icon or page shortcut is in flight.
+            if (drag.payload is DragPayload.Dock ||
+                drag.payload is DragPayload.Shortcut
+            ) {
+                val hovered = drag.rects["dock_remove"]?.contains(drag.pointer) == true
+                Surface(
+                    modifier = Modifier
+                        .trackBounds("dock_remove")
+                        .padding(top = 24.dp)
+                        .align(Alignment.TopCenter),
+                    shape = RoundedCornerShape(24.dp),
+                    color = if (hovered) {
+                        AviateOrange.copy(alpha = 0.9f)
+                    } else {
+                        Color(0xCC2F2F2F)
+                    },
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(
+                            horizontal = 16.dp,
+                            vertical = 10.dp,
+                        ),
+                    ) {
+                        Icon(
+                            Icons.Outlined.HighlightOff,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            stringResource(
+                                if (drag.payload is DragPayload.Shortcut) {
+                                    R.string.remove
+                                } else {
+                                    R.string.dock_remove
+                                }
+                            ),
+                            color = Color.White,
+                            fontSize = 14.sp,
                         )
                     }
                 }
@@ -494,7 +605,62 @@ fun LauncherRoot(
 
         // Drag ghost, above everything and untouchable: it follows the finger.
         DragGhost(iconTheme = iconTheme)
+        // Edge page-flip while an app drag dwells on a screen edge.
+        EdgeFlipEffect(drag, pagerState)
         }
+        }
+    }
+}
+
+/**
+ * Edge page-flip while dragging an app: dwell on the left/right 28dp edge
+ * ~450ms flips the pager one page; a further flip needs leaving and
+ * re-entering the edge or dwelling another 700ms. Never flips to the
+ * add-space page (the last page).
+ */
+@Composable
+private fun EdgeFlipEffect(drag: DragDropState, pagerState: androidx.compose.foundation.pager.PagerState) {
+    val density = LocalDensity.current
+    LaunchedEffect(drag.isDragging) {
+        if (!drag.isDragging) return@LaunchedEffect
+        val edgePx = with(density) { 28.dp.toPx() }
+        var inEdgeSince = 0L
+        var side = 0
+        var flippedThisDwell = false
+        while (drag.isDragging) {
+            val payload = drag.payload
+            if (payload is DragPayload.App || payload is DragPayload.Dock ||
+                payload is DragPayload.Shortcut
+            ) {
+                val width = pagerState.layoutInfo.viewportSize.width.toFloat()
+                val s = when {
+                    drag.pointer.x < edgePx -> -1
+                    width > 0f && drag.pointer.x > width - edgePx -> 1
+                    else -> 0
+                }
+                val now = System.currentTimeMillis()
+                if (s == 0) {
+                    side = 0
+                    flippedThisDwell = false
+                    inEdgeSince = 0L
+                } else if (s != side) {
+                    side = s
+                    flippedThisDwell = false
+                    inEdgeSince = now
+                } else {
+                    val wait = if (flippedThisDwell) 700L else 450L
+                    if (inEdgeSince > 0 && now - inEdgeSince >= wait) {
+                        val target = (pagerState.currentPage + s)
+                            .coerceIn(0, pagerState.pageCount - 2)
+                        if (target != pagerState.currentPage) {
+                            pagerState.animateScrollToPage(target)
+                            flippedThisDwell = true
+                            inEdgeSince = now
+                        }
+                    }
+                }
+            }
+            withFrameNanos {}
         }
     }
 }
@@ -513,10 +679,22 @@ private fun DragGhost(iconTheme: IconTheme?) {
 
     Box(Modifier.fillMaxSize()) {
         when (payload) {
-            is DragPayload.App -> {
-                val bitmap = remember(payload.app, iconTheme) {
-                    iconTheme?.bitmapFor(payload.app.component, payload.app.icon)
-                        ?: payload.app.icon.toImageBitmap()
+            is DragPayload.App, is DragPayload.Dock, is DragPayload.Shortcut -> {
+                val component = when (payload) {
+                    is DragPayload.App -> payload.app.component
+                    is DragPayload.Dock -> payload.entry.component
+                    is DragPayload.Shortcut -> payload.app.component
+                    else -> null
+                }
+                val drawable = when (payload) {
+                    is DragPayload.App -> payload.app.icon
+                    is DragPayload.Dock -> payload.entry.icon
+                    is DragPayload.Shortcut -> payload.app.icon
+                    else -> null
+                }
+                val bitmap = remember(payload, iconTheme) {
+                    component?.let { iconTheme?.bitmapFor(it, drawable) }
+                        ?: drawable?.toImageBitmap()
                 }
                 val sizePx = with(density) { 56.dp.roundToPx() }
                 Box(

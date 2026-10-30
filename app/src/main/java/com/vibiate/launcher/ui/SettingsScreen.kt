@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material.icons.filled.WbSunny
@@ -53,9 +54,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vibiate.launcher.BuildConfig
+import com.vibiate.launcher.R
 import com.vibiate.launcher.data.AppRepository
 import com.vibiate.launcher.data.DockRepository
 import com.vibiate.launcher.data.IconPackInfo
@@ -226,6 +229,14 @@ fun SettingsScreen(
                     Icons.Filled.Widgets,
                     "Restore default Home widgets",
                     onClick = onRestoreHomeWidgets,
+                )
+            }
+            item {
+                AviateRow(
+                    Icons.Filled.RestartAlt,
+                    stringResource(R.string.dock_reset),
+                    value = stringResource(R.string.dock_reset_subtitle),
+                    onClick = { dockRepository.reset() },
                 )
             }
 

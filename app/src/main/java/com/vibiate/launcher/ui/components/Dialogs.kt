@@ -106,7 +106,7 @@ fun IconPacksDialog(
     val apps by appRepository.apps.collectAsState()
     val previewApps = remember(apps) {
         val dockKeys = dockRepository.entries.value
-            .mapNotNull { e -> e.component?.let { "${it.packageName}/${it.className}" } }
+            .mapNotNull { e -> e?.component?.let { "${it.packageName}/${it.className}" } }
             .toSet()
         val docked = apps.filter { it.componentKey in dockKeys }
         val rest = apps.filter { it.componentKey !in dockKeys }

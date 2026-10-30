@@ -15,7 +15,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vibiate.launcher.R
+import com.vibiate.launcher.data.AppEntry
 import com.vibiate.launcher.data.HOME_SCREEN_ID
+import com.vibiate.launcher.data.IconTheme
 import com.vibiate.launcher.data.SettingsRepository
 import com.vibiate.launcher.ui.theme.LocalAviateColors
 import com.vibiate.launcher.widget.WidgetController
@@ -28,17 +30,30 @@ import com.vibiate.launcher.widget.WidgetController
 fun HomeScreen(
     settings: SettingsRepository,
     controller: WidgetController,
+    apps: List<AppEntry> = emptyList(),
+    iconTheme: IconTheme? = null,
+    onLaunch: (AppEntry) -> Unit = {},
+    isCurrentPage: Boolean = true,
+    /** Remove a dock icon that was dropped as a page shortcut. */
+    onDockRemove: (String) -> Unit = {},
     editBlur: Float = 0f,
     onEditingChange: (Boolean) -> Unit = {},
 ) {
     val homeWidgets by controller.widgets.collectAsState()
-    val hasWidgets = homeWidgets.any { it.screenId == HOME_SCREEN_ID }
+    val homeShortcuts by controller.shortcuts.collectAsState()
+    val hasWidgets = homeWidgets.any { it.screenId == HOME_SCREEN_ID } ||
+        homeShortcuts.any { it.screenId == HOME_SCREEN_ID }
     val aviate = LocalAviateColors.current
 
     Box(Modifier.fillMaxSize()) {
         WidgetsScreen(
             controller = controller,
             screenId = HOME_SCREEN_ID,
+            apps = apps,
+            iconTheme = iconTheme,
+            onLaunch = onLaunch,
+            isCurrentPage = isCurrentPage,
+            onDockRemove = onDockRemove,
             header = { Spacer(Modifier.height(24.dp)) },
             showEmptyState = false,
             editBlur = editBlur,

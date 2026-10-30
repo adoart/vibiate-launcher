@@ -70,8 +70,6 @@ fun AllAppsScreen(
     iconPackManager: IconPackManager,
     iconTheme: IconTheme?,
     onLaunch: (AppEntry) -> Unit,
-    /** Fired once when an icon drag passes slop: move the pager to Collections. */
-    onDragToCollections: () -> Unit = {},
     /** Emits to focus the search field (e.g. from the Collections bar). */
     focusRequests: Flow<Unit>? = null,
 ) {
@@ -133,7 +131,7 @@ fun AllAppsScreen(
                     .padding(start = 8.dp, end = railWidth),
             ) {
                 itemsIndexed(groups, key = { _, g -> g.letter }) { index, group ->
-                    LetterGroupRow(group, iconTheme, onLaunch, onDragToCollections,
+                    LetterGroupRow(group, iconTheme, onLaunch,
                         onLongPress = { menuApp = it })
                     if (index < groups.lastIndex) {
                         GroupDivider()
@@ -216,7 +214,6 @@ private fun LetterGroupRow(
     group: LetterGroup,
     iconTheme: IconTheme?,
     onLaunch: (AppEntry) -> Unit,
-    onDragToCollections: () -> Unit,
     onLongPress: (AppEntry) -> Unit,
 ) {
     val labelColor = LocalAviateColors.current.cardLabel
@@ -241,14 +238,14 @@ private fun LetterGroupRow(
                 )
             }
             group.apps.take(3).forEach { app ->
-                GroupAppCell(app, iconTheme, labelColor, onLaunch, onDragToCollections, onLongPress)
+                GroupAppCell(app, iconTheme, labelColor, onLaunch, onLongPress)
             }
             repeat(3 - minOf(3, group.apps.size)) { Spacer(Modifier.weight(1f)) }
         }
         group.apps.drop(3).chunked(4).forEach { row ->
             Row(Modifier.fillMaxWidth()) {
                 row.forEach { app ->
-                    GroupAppCell(app, iconTheme, labelColor, onLaunch, onDragToCollections, onLongPress)
+                    GroupAppCell(app, iconTheme, labelColor, onLaunch, onLongPress)
                 }
                 repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
             }
@@ -262,7 +259,6 @@ private fun androidx.compose.foundation.layout.RowScope.GroupAppCell(
     iconTheme: IconTheme?,
     labelColor: androidx.compose.ui.graphics.Color,
     onLaunch: (AppEntry) -> Unit,
-    onDragToCollections: () -> Unit,
     onLongPress: (AppEntry) -> Unit,
 ) {
     AppIcon(
@@ -273,7 +269,6 @@ private fun androidx.compose.foundation.layout.RowScope.GroupAppCell(
         labelColor = labelColor,
         modifier = Modifier.weight(1f),
         dragPayload = { DragPayload.App(app, sourceKey = null) },
-        onDragMoved = onDragToCollections,
         onLongPress = { onLongPress(app) },
     ) { onLaunch(app) }
 }

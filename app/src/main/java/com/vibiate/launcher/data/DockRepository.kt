@@ -34,7 +34,7 @@ import kotlinx.coroutines.launch
  * still unresolved is filled by the next installed launchable app not already in
  * the dock; the last resort is a glyph-only placeholder with a no-op intent.
  */
-class DockRepository(private val context: Context) {
+class DockRepository(private val context: Context, private val settings: SettingsRepository) {
 
     private data class SlotSpec(
         val glyph: ImageVector,
@@ -122,11 +122,27 @@ class DockRepository(private val context: Context) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    private val _entries = MutableStateFlow((row1Specs + row2Specs).map(::placeholder))
-    val entries: StateFlow<List<DockEntry>> = _entries
+    private val _entries = MutableStateFlow(
+        (row1Specs + row2Specs).map { placeholder(it) as DockEntry? }
+    )
+    /** Exactly [DOCK_MAX] slots; a null element is an empty spot. */
+    val entries: StateFlow<List<DockEntry?>> = _entries
 
     @Volatile
     private var resolved = false
+
+    /** Last stored slot list; null means "never customised" -> auto-resolution. */
+    @Volatile
+    private var storedKeys: List<String?>? = null
+
+    init {
+        scope.launch {
+            settings.dockApps.collect { stored ->
+                storedKeys = stored
+                _entries.value = if (stored == null) resolveDock() else resolveStored(stored)
+            }
+        }
+    }
 
     /** Resolve once lazily; safe to call repeatedly. */
     fun ensureLoaded() {
@@ -134,7 +150,87 @@ class DockRepository(private val context: Context) {
     }
 
     fun invalidate() {
-        scope.launch { _entries.value = resolveDock() }
+        scope.launch {
+            _entries.value = storedKeys?.let(::resolveStored) ?: resolveDock()
+        }
+    }
+
+    /**
+     * Component keys ("pkg/activity") of the currently shown real entries.
+     * Each auto-resolved component is mapped to its package's launcher
+     * activity so the keys match the A–Z componentKey format (e.g. the Phone
+     * slot resolved via ACTION_DIAL becomes the dialer's launch activity).
+     */
+    fun currentKeys(): List<String?> {
+        val pm = context.packageManager
+        return _entries.value.map { e ->
+            e?.component?.let { cn ->
+                dockKey(
+                    runCatching {
+                        pm.getLaunchIntentForPackage(cn.packageName)?.component
+                    }.getOrNull() ?: cn
+                )
+            }
+        }
+    }
+
+    /**
+     * Apply a dock edit. The first edit materialises the currently shown real
+     * components (glyph placeholders dropped) before the transform runs.
+     */
+    fun edit(transform: (List<String?>) -> List<String?>) {
+        scope.launch {
+            settings.setDockApps(transform(storedKeys ?: currentKeys()))
+        }
+    }
+
+    /** Clear the persisted dock and fall back to automatic resolution. */
+    fun reset() {
+        scope.launch { settings.clearDockApps() }
+    }
+
+    /**
+     * Rebuild entries from persisted slot keys. If the stored activity isn't
+     * one of the package's launcher activities, the package's own launch
+     * intent component is used instead; an entry becomes a hole only when
+     * the package itself is gone � positions never compact.
+     */
+    private fun resolveStored(keys: List<String?>): List<DockEntry?> {
+        val pm = context.packageManager
+        val resolved = mutableSetOf<String>()
+        return List(DOCK_MAX) { i ->
+            val key = keys.getOrNull(i) ?: return@List null
+            val cn = runCatching { ComponentName.unflattenFromString(key) }.getOrNull()
+                ?: return@List null
+            val ris = runCatching {
+                pm.queryIntentActivities(
+                    launcherIntent().apply { setPackage(cn.packageName) },
+                    PackageManager.MATCH_ALL,
+                )
+            }.getOrDefault(emptyList())
+            val ri = ris.firstOrNull { it.activityInfo.name == cn.className }
+                ?: runCatching { pm.getLaunchIntentForPackage(cn.packageName) }
+                    .getOrNull()?.component?.let { target ->
+                        ris.firstOrNull {
+                            it.activityInfo.name == target.className
+                        }
+                    }
+                ?: return@List null
+            val resolvedCn = ComponentName(
+                ri.activityInfo.packageName, ri.activityInfo.name
+            )
+            if (!resolved.add(dockKey(resolvedCn))) return@List null
+            DockEntry(
+                label = ri.loadLabel(pm).toString(),
+                icon = ri.loadIcon(pm),
+                glyph = Icons.Filled.Folder,
+                intent = launcherIntent().apply {
+                    component = resolvedCn
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                },
+                component = resolvedCn,
+            )
+        }
     }
 
     private fun placeholder(spec: SlotSpec) = DockEntry(
@@ -145,7 +241,7 @@ class DockRepository(private val context: Context) {
         component = null,
     )
 
-    private fun resolveDock(): List<DockEntry> {
+    private fun resolveDock(): List<DockEntry?> {
         val pm = context.packageManager
         val specs = row1Specs + row2Specs
         val usedPackages = mutableSetOf(context.packageName)

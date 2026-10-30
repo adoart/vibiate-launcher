@@ -12,7 +12,7 @@ class VibiateApplication : Application() {
 
     val settingsRepository by lazy { SettingsRepository(this) }
     val appRepository by lazy { AppRepository(this) }
-    val dockRepository by lazy { DockRepository(this) }
+    val dockRepository by lazy { DockRepository(this, settingsRepository) }
     val iconPackManager by lazy { IconPackManager(this) }
     val widgetController by lazy { WidgetController(this, settingsRepository) }
     val wallpaperRotator by lazy { WallpaperRotator(this, settingsRepository) }

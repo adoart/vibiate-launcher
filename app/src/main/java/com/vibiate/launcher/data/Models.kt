@@ -46,6 +46,31 @@ data class AppEntry(
     val componentKey: String get() = "$packageName/$activityName"
 }
 
+/** An app icon pinned to a widget page's grid at a fixed cell. */
+data class PageShortcut(
+    val id: Int,
+    val componentKey: String,
+    val screenId: Int,
+    val col: Int = -1,
+    val row: Int = -1,
+) {
+    /** "id;screenId;col;row;componentKey" — the key goes last. */
+    fun serialize(): String = "$id;$screenId;$col;$row;$componentKey"
+
+    companion object {
+        fun deserialize(s: String): PageShortcut? {
+            val parts = s.split(';', limit = 5)
+            if (parts.size < 5) return null
+            val id = parts[0].toIntOrNull() ?: return null
+            val screenId = parts[1].toIntOrNull() ?: return null
+            val col = parts[2].toIntOrNull() ?: return null
+            val row = parts[3].toIntOrNull() ?: return null
+            val key = normalizeDockKey(parts[4]) ?: return null
+            return PageShortcut(id, key, screenId, col, row)
+        }
+    }
+}
+
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
 /** App-wide font family choice, applied through VibiateTheme's Typography. */
@@ -94,15 +119,37 @@ data class WidgetEntry(
     val cols: Int = 0,
     val rows: Int = 0,
     val title: String = "",
+    /** Fixed grid position; -1 = not placed yet (migrated on render). */
+    val col: Int = -1,
+    val row: Int = -1,
 ) {
+    /** v2 format: "v2;id;pkg;class;screenId;cols;rows;col;row;title". */
     fun serialize(): String =
-        "$appWidgetId;$providerPackage;$providerClass;$screenId;$cols;$rows;" +
+        "v2;$appWidgetId;$providerPackage;$providerClass;$screenId;" +
+            "$cols;$rows;$col;$row;" +
             title.replace('\n', ' ').replace('\r', ' ')
     val component: ComponentName get() = ComponentName(providerPackage, providerClass)
 
     companion object {
         fun deserialize(s: String): WidgetEntry? {
-            // Title is last so a ';' inside it survives the split.
+            if (s.startsWith("v2;")) {
+                // Title is last so a ';' inside it survives the split.
+                val parts = s.removePrefix("v2;").split(';', limit = 9)
+                if (parts.size < 3) return null
+                val id = parts[0].toIntOrNull() ?: return null
+                return WidgetEntry(
+                    appWidgetId = id,
+                    providerPackage = parts[1],
+                    providerClass = parts[2],
+                    screenId = parts.getOrNull(3)?.toIntOrNull() ?: 0,
+                    cols = parts.getOrNull(4)?.toIntOrNull() ?: 0,
+                    rows = parts.getOrNull(5)?.toIntOrNull() ?: 0,
+                    title = parts.getOrNull(8) ?: "",
+                    col = parts.getOrNull(6)?.toIntOrNull() ?: -1,
+                    row = parts.getOrNull(7)?.toIntOrNull() ?: -1,
+                )
+            }
+            // Legacy "id;pkg;class;screenId;cols;rows;title".
             val parts = s.split(';', limit = 7)
             if (parts.size < 3) return null
             val id = parts[0].toIntOrNull() ?: return null

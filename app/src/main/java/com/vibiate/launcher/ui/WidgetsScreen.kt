@@ -48,6 +48,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -71,6 +73,7 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.res.stringResource
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.ui.text.style.TextOverflow
@@ -81,22 +84,37 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.runtime.withFrameNanos
 import com.vibiate.launcher.R
+import com.vibiate.launcher.data.AppEntry
+import com.vibiate.launcher.data.IconTheme
+import com.vibiate.launcher.data.PageShortcut
 import com.vibiate.launcher.data.WidgetEntry
+import com.vibiate.launcher.data.dockKey
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.HighlightOff
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.RemoveCircleOutline
+import com.vibiate.launcher.ui.components.AppIcon
+import com.vibiate.launcher.ui.components.openAppDetails
+import com.vibiate.launcher.ui.drag.DragPayload
+import com.vibiate.launcher.ui.drag.LocalDragDrop
+import com.vibiate.launcher.ui.drag.trackBounds
 import com.vibiate.launcher.ui.theme.LocalAviateColors
 import com.vibiate.launcher.ui.theme.LocalIsDark
 import com.vibiate.launcher.widget.LongPressAppWidgetHostView
 import com.vibiate.launcher.widget.GridPos
-import com.vibiate.launcher.widget.GridRect
 import com.vibiate.launcher.widget.GridSpan
 import com.vibiate.launcher.widget.WIDGET_COLUMNS
 import com.vibiate.launcher.widget.WidgetController
 import com.vibiate.launcher.widget.autoSpan
 import com.vibiate.launcher.widget.clampSpan
-import com.vibiate.launcher.widget.dragReorder
+import com.vibiate.launcher.widget.dropPlacement
+import com.vibiate.launcher.widget.firstFreeSpot
 import com.vibiate.launcher.widget.flowLayout
+import com.vibiate.launcher.widget.placeWithPushDown
 import com.vibiate.launcher.widget.pxToCells
+import com.vibiate.launcher.widget.shortcutDropId
+import com.vibiate.launcher.widget.shortcutGridId
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 private val cellHeight = 96.dp
@@ -122,6 +140,13 @@ fun WidgetsScreen(
     screenId: Int,
     screenName: String? = null,
     onRemoveScreen: (() -> Unit)? = null,
+    /** Installed apps — used to render + drop page shortcuts. */
+    apps: List<AppEntry> = emptyList(),
+    iconTheme: IconTheme? = null,
+    onLaunch: (AppEntry) -> Unit = {},
+    isCurrentPage: Boolean = true,
+    /** Remove a dock icon that was moved onto this page. */
+    onDockRemove: (String) -> Unit = {},
     header: (@Composable ColumnScope.() -> Unit)? = null,
     showEmptyState: Boolean = true,
     /** 0..1 background-blur fraction while a widget is edited (OxygenOS). */
@@ -130,6 +155,17 @@ fun WidgetsScreen(
 ) {
     val allWidgets by controller.widgets.collectAsState()
     val widgets = allWidgets.filter { it.screenId == screenId }
+    val allShortcuts by controller.shortcuts.collectAsState()
+    val screenShortcuts = allShortcuts.filter { it.screenId == screenId }
+    // Only renderable shortcuts take part in the grid (app still installed).
+    val shortcutCells = screenShortcuts.mapNotNull { s ->
+        apps.firstOrNull { it.componentKey == s.componentKey }
+            ?.let { s to it }
+    }
+    val drag = LocalDragDrop.current
+    val pageKey = "page_$screenId"
+    var gridRoot by remember { mutableStateOf(Offset.Zero) }
+    var shortcutMenuId by remember { mutableStateOf<Int?>(null) }
     val density = LocalDensity.current
     val aviate = LocalAviateColors.current
     // Same rule as Home: shadow only in dark mode keeps text legible over
@@ -149,10 +185,13 @@ fun WidgetsScreen(
     var previewSpan by remember { mutableStateOf<GridSpan?>(null) }
     var dragging by remember { mutableStateOf(false) }
 
-    // Move/reorder: the dragged widget follows the finger (translucent +
-    // dimmed), a blue slot marks its grid position, others reflow live.
+    // Move: the dragged widget floats under the finger (translucent +
+    // dimmed), a slot marks its target grid position, colliders push down.
     var movingId by remember { mutableStateOf<Int?>(null) }
-    var moveOrder by remember { mutableStateOf<List<Int>?>(null) }
+    var movePreview by remember { mutableStateOf<Map<Int, GridPos>?>(null) }
+    var dragStartItems by remember {
+        mutableStateOf<Map<Int, Pair<GridPos, GridSpan>>?>(null)
+    }
     var grabOffset by remember { mutableStateOf(Offset.Zero) }
     var fingerRaw by remember { mutableStateOf(Offset.Zero) }
     var gridScreenPos by remember { mutableStateOf(Offset.Zero) }
@@ -166,9 +205,7 @@ fun WidgetsScreen(
         rootView.getLocationOnScreen(loc)
         Offset(loc[0].toFloat(), loc[1].toFloat())
     }
-    val orderedWidgets = moveOrder?.mapNotNull { id ->
-        widgets.firstOrNull { it.appWidgetId == id }
-    } ?: widgets
+    val orderedWidgets = widgets
 
     // Drop edit/menu state when the target widget disappears.
     val effectiveEditId = editId?.takeIf { id ->
@@ -193,7 +230,8 @@ fun WidgetsScreen(
         editId = null
         previewSpan = null
         movingId = null
-        moveOrder = null
+        movePreview = null
+        dragStartItems = null
     }
 
     Column(
@@ -204,6 +242,7 @@ fun WidgetsScreen(
                 viewportTop = (it.positionInWindow() + windowOrigin).y
                 viewportBottom = viewportTop + it.size.height
             }
+            .trackBounds(pageKey)
             .padding(horizontal = gridPadding)
             // Tap outside a widget exits edit mode. The detector is only
             // attached while editing: an always-on detectTapGestures would
@@ -217,7 +256,8 @@ fun WidgetsScreen(
                             editId = null
                             previewSpan = null
                             movingId = null
-                            moveOrder = null
+                            movePreview = null
+                            dragStartItems = null
                         }
                     }
                 } else {
@@ -253,7 +293,9 @@ fun WidgetsScreen(
         }
         header?.invoke(this)
 
-        if (widgets.isEmpty() && showEmptyState) {
+        if (widgets.isEmpty() && shortcutCells.isEmpty() &&
+            !drag.isDragging && showEmptyState
+        ) {
             Column(
                 Modifier
                     .fillMaxWidth()
@@ -292,11 +334,233 @@ fun WidgetsScreen(
                 val stepX = cellWPx + gapPxF
                 val stepY = cellHPx + gapPxF
 
+                // Persist fixed grid positions. With nothing placed yet the
+                // flow layout becomes the positions (existing pages look
+                // identical); later additions fill the first free spot.
+                // Shortcut ids join the map as -id with a 1x1 span.
+                LaunchedEffect(orderedWidgets, screenShortcuts, cellW) {
+                    val unplacedW = orderedWidgets.filter {
+                        it.col < 0 || it.row < 0
+                    }
+                    val unplacedS = screenShortcuts.filter {
+                        it.col < 0 || it.row < 0
+                    }
+                    if (unplacedW.isEmpty() && unplacedS.isEmpty()) {
+                        return@LaunchedEffect
+                    }
+                    val spanOf = orderedWidgets.associate {
+                        it.appWidgetId to effectiveSpan(
+                            it, infos[it.appWidgetId], density.density, cellW,
+                        )
+                    }
+                    val positions: Map<Int, GridPos> =
+                        if (unplacedW.size == orderedWidgets.size &&
+                            unplacedS.size == screenShortcuts.size
+                        ) {
+                            val fl = flowLayout(
+                                orderedWidgets.map { spanOf[it.appWidgetId]!! } +
+                                    screenShortcuts.map { GridSpan(1, 1) }
+                            )
+                            (orderedWidgets.mapIndexed { i, e ->
+                                e.appWidgetId to fl[i]
+                            } + screenShortcuts.mapIndexed { i, s ->
+                                shortcutGridId(s.id) to
+                                    fl[orderedWidgets.size + i]
+                            }).toMap()
+                        } else {
+                            val m = LinkedHashMap<Int, Pair<GridPos, GridSpan>>()
+                            orderedWidgets
+                                .filter { it.col >= 0 && it.row >= 0 }
+                                .forEach {
+                                    m[it.appWidgetId] = GridPos(it.col, it.row) to
+                                        spanOf[it.appWidgetId]!!
+                                }
+                            screenShortcuts
+                                .filter { it.col >= 0 && it.row >= 0 }
+                                .forEach {
+                                    m[shortcutGridId(it.id)] =
+                                        GridPos(it.col, it.row) to GridSpan(1, 1)
+                                }
+                            unplacedW.forEach { e ->
+                                val sp = spanOf[e.appWidgetId]!!
+                                m[e.appWidgetId] =
+                                    firstFreeSpot(m.values.toList(), sp) to sp
+                            }
+                            unplacedS.forEach { s ->
+                                m[shortcutGridId(s.id)] =
+                                    firstFreeSpot(m.values.toList(), GridSpan(1, 1)) to
+                                        GridSpan(1, 1)
+                            }
+                            m.mapValues { it.value.first }
+                        }
+                    controller.placeWidgets(screenId, positions)
+                }
+
+                // Rendered positions: stored when placed, flow order for the
+                // one frame before migration lands; previews while editing.
+                val flowFallback = flowLayout(
+                    layoutSpans + shortcutCells.map { GridSpan(1, 1) }
+                )
+                val basePos = mutableMapOf<Int, GridPos>()
+                orderedWidgets.forEachIndexed { i, e ->
+                    basePos[e.appWidgetId] = if (e.col >= 0 && e.row >= 0) {
+                        GridPos(e.col, e.row)
+                    } else {
+                        flowFallback[i]
+                    }
+                }
+                shortcutCells.forEachIndexed { i, cell ->
+                    val s = cell.first
+                    basePos[shortcutGridId(s.id)] =
+                        if (s.col >= 0 && s.row >= 0) {
+                            GridPos(s.col, s.row)
+                        } else {
+                            flowFallback[orderedWidgets.size + i]
+                        }
+                }
+                val baseItems = orderedWidgets.associate { e ->
+                    e.appWidgetId to
+                        (basePos[e.appWidgetId]!! to spans[orderedWidgets.indexOf(e)])
+                } + shortcutCells.associate { cell ->
+                    val s = cell.first
+                    shortcutGridId(s.id) to
+                        (basePos[shortcutGridId(s.id)]!! to GridSpan(1, 1))
+                }
+
+                // ---- App-icon drop target: cell under the finger ----
+                val overDock by derivedStateOf {
+                    drag.rects["dock"]?.contains(drag.pointer) == true ||
+                        drag.rects["dock_remove"]?.contains(drag.pointer) == true
+                }
+                val dropTarget by derivedStateOf {
+                    val p = drag.payload
+                    if ((p !is DragPayload.App && p !is DragPayload.Dock &&
+                            p !is DragPayload.Shortcut) ||
+                        !isCurrentPage || overDock ||
+                        drag.rects[pageKey]?.contains(drag.pointer) != true
+                    ) {
+                        null
+                    } else {
+                        GridPos(
+                            ((drag.pointer.x - gridRoot.x) / stepX)
+                                .toInt().coerceIn(0, WIDGET_COLUMNS - 1),
+                            ((drag.pointer.y - gridRoot.y) / stepY)
+                                .toInt().coerceAtLeast(0),
+                        )
+                    }
+                }
+                val pendingDrop by derivedStateOf {
+                    val target = dropTarget ?: return@derivedStateOf null
+                    val p = drag.payload
+                    val nextId = (allShortcuts.maxOfOrNull { it.id } ?: 0) + 1
+                    when (p) {
+                        is DragPayload.App -> {
+                            val same = screenShortcuts.firstOrNull {
+                                it.componentKey == p.app.componentKey
+                            }?.id
+                            val gid = -shortcutDropId(same, null, nextId)
+                            PendingDrop(
+                                dropPlacement(baseItems, gid, target),
+                                p.app.componentKey, null,
+                            )
+                        }
+                        is DragPayload.Dock -> {
+                            val key = p.entry.component?.let { cn ->
+                                apps.firstOrNull {
+                                    it.componentKey == dockKey(cn)
+                                }?.componentKey
+                            } ?: return@derivedStateOf null
+                            val same = screenShortcuts.firstOrNull {
+                                it.componentKey == key
+                            }?.id
+                            val gid = -shortcutDropId(same, null, nextId)
+                            PendingDrop(
+                                dropPlacement(baseItems, gid, target),
+                                key, null,
+                            )
+                        }
+                        is DragPayload.Shortcut -> {
+                            val same = screenShortcuts.firstOrNull {
+                                it.componentKey == p.app.componentKey &&
+                                    it.id != p.shortcut.id
+                            }?.id
+                            val gid = -shortcutDropId(
+                                same, p.shortcut.id, nextId,
+                            )
+                            PendingDrop(
+                                dropPlacement(baseItems, gid, target),
+                                p.app.componentKey, p.shortcut.id,
+                            )
+                        }
+                        else -> null
+                    }
+                }
+                val dropPreview = pendingDrop?.positions
+
+                // This page's drop zone — wins only while visible, inside its
+                // rect, and not over the dock/remove zones.
+                val latestPending by rememberUpdatedState(pendingDrop)
+                val latestCurrent by rememberUpdatedState(isCurrentPage)
+                DisposableEffect(drag) {
+                    val handler: (DragPayload, Offset) -> Boolean = handler@{ p, _ ->
+                        if (!latestCurrent || latestPending == null) {
+                            false
+                        } else {
+                            val drop = latestPending!!
+                            when (p) {
+                                is DragPayload.App -> {
+                                    controller.dropShortcut(
+                                        screenId, drop.componentKey,
+                                        drop.positions, drop.movingShortcutId,
+                                    )
+                                    true
+                                }
+                                is DragPayload.Dock -> {
+                                    controller.dropShortcut(
+                                        screenId, drop.componentKey,
+                                        drop.positions, drop.movingShortcutId,
+                                    )
+                                    p.entry.component?.let {
+                                        onDockRemove(dockKey(it))
+                                    }
+                                    true
+                                }
+                                is DragPayload.Shortcut -> {
+                                    controller.dropShortcut(
+                                        screenId, drop.componentKey,
+                                        drop.positions, drop.movingShortcutId,
+                                    )
+                                    true
+                                }
+                                else -> false
+                            }
+                        }
+                    }
+                    drag.dropHandlers[pageKey] = handler
+                    onDispose {
+                        if (drag.dropHandlers[pageKey] === handler) {
+                            drag.dropHandlers.remove(pageKey)
+                        }
+                    }
+                }
+
+                // Growing a resized widget pushes overlapped widgets down.
+                val resizePreview = previewSpan?.let { ps ->
+                    val id = effectiveEditId ?: return@let null
+                    placeWithPushDown(
+                        baseItems, id, basePos[id] ?: GridPos(0, 0), ps,
+                    )
+                }
+                val livePos =
+                    movePreview ?: resizePreview ?: dropPreview ?: basePos
+
                 Layout(
                     modifier = Modifier
                         .fillMaxWidth()
                         .onGloballyPositioned {
-                            gridScreenPos = it.positionInWindow() + windowOrigin
+                            gridScreenPos =
+                                it.positionInWindow() + windowOrigin
+                            gridRoot = it.positionInRoot()
                         },
                     content = {
                         orderedWidgets.forEach { entry ->
@@ -319,7 +583,8 @@ fun WidgetsScreen(
                                         editId = entry.appWidgetId
                                         previewSpan = null
                                         movingId = null
-                                        moveOrder = null
+                                        movePreview = null
+                                        dragStartItems = null
                                         menuId = entry.appWidgetId
                                     },
                                     // Dismissing the menu keeps the widget
@@ -341,11 +606,7 @@ fun WidgetsScreen(
                                         fingerRaw = Offset(dx, dy)
                                         // grabOffset = down point relative to
                                         // the widget's grid-local top-left.
-                                        val idx = orderedWidgets.indexOfFirst {
-                                            it.appWidgetId == entry.appWidgetId
-                                        }
-                                        val gp = flowLayout(layoutSpans)
-                                            .getOrNull(idx)
+                                        val gp = basePos[entry.appWidgetId]
                                         grabOffset = if (gp != null) {
                                             Offset(
                                                 dx - gridScreenPos.x -
@@ -354,64 +615,47 @@ fun WidgetsScreen(
                                                     gp.row * stepY,
                                             )
                                         } else Offset.Zero
-                                        moveOrder =
-                                            widgets.map { it.appWidgetId }
+                                        dragStartItems = baseItems
+                                        movePreview = null
                                         movingId = entry.appWidgetId
                                     },
                                     onDragMove = { rx, ry ->
                                         fingerRaw = Offset(rx, ry)
-                                        val order = moveOrder
+                                        val items = dragStartItems
                                         val dragId = movingId
-                                        if (order != null && dragId != null) {
-                                            val positions =
-                                                flowLayout(layoutSpans)
-                                            val rects =
-                                                orderedWidgets.mapIndexed {
-                                                    i, _ ->
-                                                    val s = layoutSpans[i]
-                                                    val p = positions[i]
-                                                    val l = (p.col * stepX)
-                                                        .roundToInt()
-                                                    val t = (p.row * stepY)
-                                                        .roundToInt()
-                                                    GridRect(
-                                                        l, t,
-                                                        l + (
-                                                            s.cols * cellWPx +
-                                                                (s.cols - 1) *
-                                                                    gapPxF
-                                                            ).roundToInt(),
-                                                        t + (
-                                                            s.rows * cellHPx +
-                                                                (s.rows - 1) *
-                                                                    gapPxF
-                                                            ).roundToInt(),
-                                                    )
-                                                }
-                                            val bottom =
-                                                rects.maxOfOrNull { it.bottom }
-                                                    ?: 0
-                                            moveOrder = dragReorder(
-                                                order, rects, dragId,
-                                                (rx - gridScreenPos.x).toInt(),
-                                                (ry - gridScreenPos.y).toInt(),
-                                                bottom,
+                                        if (items != null && dragId != null) {
+                                            val span = items[dragId]!!.second
+                                            // Target cell = ghost top-left
+                                            // rounded to the nearest cell.
+                                            val target = GridPos(
+                                                ((rx - gridScreenPos.x -
+                                                    grabOffset.x) / stepX)
+                                                    .roundToInt()
+                                                    .coerceIn(
+                                                        0,
+                                                        WIDGET_COLUMNS -
+                                                            span.cols,
+                                                    ),
+                                                ((ry - gridScreenPos.y -
+                                                    grabOffset.y) / stepY)
+                                                    .roundToInt()
+                                                    .coerceAtLeast(0),
+                                            )
+                                            movePreview = placeWithPushDown(
+                                                items, dragId, target, span,
                                             )
                                         }
                                     },
                                     onDragEnd = { cancelled ->
-                                        val order = moveOrder
-                                        if (!cancelled && order != null &&
-                                            order != widgets.map {
-                                                it.appWidgetId
-                                            }
-                                        ) {
-                                            controller.moveWidgets(
-                                                screenId, order,
+                                        val preview = movePreview
+                                        if (!cancelled && preview != null) {
+                                            controller.placeWidgets(
+                                                screenId, preview,
                                             )
                                         }
                                         movingId = null
-                                        moveOrder = null
+                                        movePreview = null
+                                        dragStartItems = null
                                         // The widget STAYS in edit mode so
                                         // resize handles are one drag away.
                                     },
@@ -423,17 +667,50 @@ fun WidgetsScreen(
                                         // only tap-outside / Back / page
                                         // switch exits it.
                                         dragging = false
+                                        // Persist the new span plus the
+                                        // pushed-down positions it caused.
+                                        val pos = resizePreview ?: basePos
                                         previewSpan = null
-                                        controller.resizeWidget(
-                                            entry.appWidgetId, span.cols, span.rows,
+                                        controller.placeWidgets(
+                                            screenId, pos,
+                                            spans = mapOf(
+                                                entry.appWidgetId to span,
+                                            ),
                                         )
                                     },
                                 )
                             }
                         }
-                        if (movingId != null) {
+                        shortcutCells.forEach { (shortcut, app) ->
+                            key("sc_${shortcut.id}") {
+                                // Keep the source cell composed while its
+                                // icon is dragged (hidden, not removed) —
+                                // disposing the node kills the gesture.
+                                ShortcutCell(
+                                    shortcut = shortcut,
+                                    app = app,
+                                    iconTheme = iconTheme,
+                                    hidden = (drag.payload as? DragPayload
+                                        .Shortcut)?.shortcut?.id == shortcut.id,
+                                    blur = editBlur > 0.01f,
+                                    labelColor = aviate.homeText,
+                                    menuOpen = shortcutMenuId == shortcut.id,
+                                    onMenuOpen = {
+                                        shortcutMenuId = shortcut.id
+                                    },
+                                    onMenuDismiss = { shortcutMenuId = null },
+                                    onRemove = {
+                                        shortcutMenuId = null
+                                        controller.removeShortcut(shortcut.id)
+                                    },
+                                    onLaunch = { onLaunch(app) },
+                                )
+                            }
+                        }
+                        if (movingId != null || pendingDrop != null) {
                             // Blue slot at the dragged widget's live position
-                            // (measured to its span in the measure block).
+                            // or an incoming icon's target cell (measured to
+                            // its span in the measure block).
                             Box(
                                 Modifier
                                     .border(
@@ -452,34 +729,58 @@ fun WidgetsScreen(
                     val gapPx = gridGap.roundToPx()
                     val cellWPx = cellW.roundToPx()
                     val cellHPx = cellHeight.roundToPx()
-                    val positions: List<GridPos> = flowLayout(layoutSpans)
                     val n = orderedWidgets.size
+                    val m = shortcutCells.size
                     val dragIdx = orderedWidgets.indexOfFirst {
                         it.appWidgetId == movingId
                     }
-                    val placeables = measurables.mapIndexed { i, m ->
-                        // Children [0, n) = cells; [n] = the move placeholder.
-                        val s = if (i < n) layoutSpans[i] else layoutSpans[dragIdx]
-                        m.measure(
+                    val placeables = measurables.mapIndexed { i, ms ->
+                        // [0,n) widgets, [n,n+m) shortcuts (1x1), [n+m] slot.
+                        val s = when {
+                            i < n -> layoutSpans[i]
+                            i < n + m -> GridSpan(1, 1)
+                            movingId != null && dragIdx >= 0 ->
+                                layoutSpans[dragIdx]
+                            else -> GridSpan(1, 1)
+                        }
+                        ms.measure(
                             Constraints.fixed(
                                 s.cols * cellWPx + (s.cols - 1) * gapPx,
                                 s.rows * cellHPx + (s.rows - 1) * gapPx,
                             )
                         )
                     }
-                    val usedRows = positions.indices.maxOfOrNull {
-                        positions[it].row + layoutSpans[it].rows
-                    } ?: 0
-                    val totalH = if (usedRows == 0) 0
-                        else usedRows * cellHPx + (usedRows - 1) * gapPx
+                    val posOf = { id: Int -> livePos[id] ?: GridPos(0, 0) }
+                    val usedRows = maxOf(
+                        orderedWidgets.maxOfOrNull { e ->
+                            posOf(e.appWidgetId).row +
+                                layoutSpans[orderedWidgets.indexOf(e)].rows
+                        } ?: 0,
+                        shortcutCells.maxOfOrNull { cell ->
+                            posOf(shortcutGridId(cell.first.id)).row + 1
+                        } ?: 0,
+                    )
+                    // One spare row while editing or hovering a drop so items
+                    // can be moved or grown past the current bottom.
+                    val totalRows = usedRows +
+                        if (movingId != null || previewSpan != null ||
+                            pendingDrop != null
+                        ) {
+                            1
+                        } else {
+                            0
+                        }
+                    val totalH = if (totalRows == 0) 0
+                        else totalRows * cellHPx + (totalRows - 1) * gapPx
                     layout(constraints.maxWidth, totalH) {
                         placeables.forEachIndexed { i, p ->
-                            if (i == n) {
-                                // Placeholder: the dragged widget's slot in
-                                // the live order.
+                            if (i == n + m) {
+                                // Placeholder: move target or drop cell.
+                                val gp = dropTarget
+                                    ?: posOf(movingId ?: -1)
                                 p.place(
-                                    positions[dragIdx].col * (cellWPx + gapPx),
-                                    positions[dragIdx].row * (cellHPx + gapPx),
+                                    gp.col * (cellWPx + gapPx),
+                                    gp.row * (cellHPx + gapPx),
                                 )
                             } else if (i == dragIdx && movingId != null) {
                                 // The real widget follows the finger.
@@ -495,9 +796,18 @@ fun WidgetsScreen(
                                     zIndex = 2f,
                                 )
                             } else {
+                                val gp = if (i < n) {
+                                    posOf(orderedWidgets[i].appWidgetId)
+                                } else {
+                                    posOf(
+                                        shortcutGridId(
+                                            shortcutCells[i - n].first.id
+                                        )
+                                    )
+                                }
                                 p.place(
-                                    positions[i].col * (cellWPx + gapPx),
-                                    positions[i].row * (cellHPx + gapPx),
+                                    gp.col * (cellWPx + gapPx),
+                                    gp.row * (cellHPx + gapPx),
                                 )
                             }
                         }
@@ -933,3 +1243,98 @@ private fun CornerResizeHandle(
     }
 }
 
+
+/** A computed page drop: the shared preview/commit payload (result map + key). */
+private data class PendingDrop(
+    val positions: Map<Int, GridPos>,
+    val componentKey: String,
+    val movingShortcutId: Int?,
+)
+
+/**
+ * A pinned app icon on a widget page — 1x1 cell, tap launches, long-press +
+ * move drags, long-press alone opens Remove / App info.
+ */
+@Composable
+private fun ShortcutCell(
+    shortcut: PageShortcut,
+    app: AppEntry,
+    iconTheme: IconTheme?,
+    hidden: Boolean,
+    blur: Boolean,
+    labelColor: Color,
+    menuOpen: Boolean,
+    onMenuOpen: () -> Unit,
+    onMenuDismiss: () -> Unit,
+    onRemove: () -> Unit,
+    onLaunch: () -> Unit,
+) {
+    val context = LocalContext.current
+    val isDark = LocalIsDark.current
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .then(if (blur) Modifier.blur(16.dp) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        AppIcon(
+            app = app,
+            iconTheme = iconTheme,
+            showLabel = true,
+            iconSize = 48.dp,
+            labelColor = labelColor,
+            modifier = Modifier.graphicsLayer {
+                alpha = if (hidden) 0f else 1f
+            },
+            dragPayload = { DragPayload.Shortcut(shortcut, app) },
+            onLongPress = onMenuOpen,
+            onLaunch = onLaunch,
+        )
+        DropdownMenu(
+            expanded = menuOpen,
+            onDismissRequest = onMenuDismiss,
+            shape = RoundedCornerShape(16.dp),
+            containerColor = if (isDark) Color(0xFF2F2F2F) else Color(0xFFF2F2F2),
+            modifier = Modifier.widthIn(min = 220.dp),
+        ) {
+            val contentColor = if (isDark) Color.White else Color(0xFF1C1C1C)
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        stringResource(R.string.remove),
+                        color = contentColor,
+                        fontSize = 15.sp,
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        Icons.Outlined.RemoveCircleOutline,
+                        contentDescription = null,
+                        tint = contentColor,
+                    )
+                },
+                onClick = onRemove,
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        stringResource(R.string.dock_app_info),
+                        color = contentColor,
+                        fontSize = 15.sp,
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        Icons.Outlined.Info,
+                        contentDescription = null,
+                        tint = contentColor,
+                    )
+                },
+                onClick = {
+                    onMenuDismiss()
+                    openAppDetails(context, app)
+                },
+            )
+        }
+    }
+}

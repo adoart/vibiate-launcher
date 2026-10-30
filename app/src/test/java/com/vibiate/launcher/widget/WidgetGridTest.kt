@@ -153,47 +153,118 @@ class WidgetGridTest {
 
 class WidgetDragTest {
 
-    private fun e(id: Int, screenId: Int) = WidgetEntry(
-        appWidgetId = id,
-        providerPackage = "pkg$id",
-        providerClass = "Cls$id",
-        screenId = screenId,
-    )
+    private fun p(c: Int, r: Int) = GridPos(c, r)
+    private fun s(c: Int, r: Int) = GridSpan(c, r)
+
+    // ---- firstFreeSpot ----
 
     @Test
-    fun `hitIndex returns rect containing point`() {
-        val rects = listOf(
-            GridRect(0, 0, 100, 50),
-            GridRect(0, 54, 100, 104),
-        )
-        assertEquals(0, hitIndex(rects, 50, 25))
-        assertEquals(1, hitIndex(rects, 50, 80))
-        assertNull(hitIndex(rects, 50, 120))
-        assertNull(hitIndex(rects, 150, 25))
-        // Edge of a rect is outside its inner 70% hysteresis band.
-        assertNull(hitIndex(rects, 2, 25))
-        assertNull(hitIndex(rects, 98, 25))
+    fun `firstFreeSpot on empty grid is top-left`() {
+        assertEquals(p(0, 0), firstFreeSpot(emptyList(), s(4, 1)))
     }
 
     @Test
-    fun `moved reorders forward backward and same index`() {
-        val l = listOf(1, 2, 3, 4)
-        assertEquals(listOf(2, 3, 1, 4), l.moved(0, 2))
-        assertEquals(listOf(4, 1, 2, 3), l.moved(3, 0))
-        assertEquals(l, l.moved(1, 1))
-        assertEquals(l, l.moved(9, 0))
+    fun `firstFreeSpot fills a gap`() {
+        val placed = listOf(p(0, 0) to s(4, 2), p(0, 3) to s(4, 1))
+        assertEquals(p(0, 2), firstFreeSpot(placed, s(4, 1)))
     }
 
     @Test
-    fun `mergeScreenOrder reorders only that screen`() {
-        val all = listOf(
-            e(1, 0), e(2, 1), e(3, 0), e(4, 0), e(5, 1),
+    fun `firstFreeSpot skips narrow gaps for wide spans`() {
+        // 2-wide gap at cols 1-2 between two 1-wide widgets on row 0.
+        val placed = listOf(p(0, 0) to s(1, 1), p(3, 0) to s(1, 1))
+        // A 2-wide span fills the gap; a 4-wide span goes to the next row.
+        assertEquals(p(1, 0), firstFreeSpot(placed, s(2, 1)))
+        assertEquals(p(0, 1), firstFreeSpot(placed, s(4, 1)))
+    }
+
+    // ---- placeWithPushDown ----
+
+    @Test
+    fun `drop into empty area moves nobody`() {
+        val items = mapOf(
+            1 to (p(0, 0) to s(4, 2)),
+            2 to (p(0, 2) to s(4, 1)),
         )
-        val merged = mergeScreenOrder(all, 0, listOf(4, 3, 1))
-        assertEquals(listOf(4, 2, 3, 1, 5), merged.map { it.appWidgetId })
-        // Missing ids leave the slot as-is; extra ids are ignored.
-        val partial = mergeScreenOrder(all, 0, listOf(4, 3))
-        assertEquals(listOf(4, 2, 3, 1, 5), partial.map { it.appWidgetId })
+        val out = placeWithPushDown(items, 2, p(0, 4), s(4, 1))
+        assertEquals(p(0, 0), out[1])
+        assertEquals(p(0, 4), out[2])
+    }
+
+    @Test
+    fun `drop onto a widget pushes it straight down`() {
+        val items = mapOf(
+            1 to (p(0, 0) to s(4, 2)),
+            2 to (p(0, 2) to s(4, 1)),
+        )
+        val out = placeWithPushDown(items, 2, p(0, 1), s(4, 1))
+        assertEquals(p(0, 1), out[2])
+        assertEquals(p(0, 2), out[1])
+    }
+
+    @Test
+    fun `pushdown cascades`() {
+        val items = mapOf(
+            1 to (p(0, 0) to s(4, 1)),
+            2 to (p(0, 1) to s(4, 1)),
+            3 to (p(0, 2) to s(4, 1)),
+        )
+        // Drop 3 on top of 1: 1 slides to row 1, which pushes 2 to row 2.
+        val out = placeWithPushDown(items, 3, p(0, 0), s(4, 1))
+        assertEquals(p(0, 0), out[3])
+        assertEquals(p(0, 1), out[1])
+        assertEquals(p(0, 2), out[2])
+    }
+
+    @Test
+    fun `target column clamps to grid`() {
+        val items = mapOf(1 to (p(0, 0) to s(2, 1)))
+        val out = placeWithPushDown(items, 1, p(3, 0), s(2, 1))
+        assertEquals(p(2, 0), out[1])
+    }
+
+    @Test
+    fun `resize growth pushes neighbour down`() {
+        val items = mapOf(
+            1 to (p(0, 0) to s(4, 1)),
+            2 to (p(0, 1) to s(4, 1)),
+        )
+        val out = placeWithPushDown(items, 1, p(0, 0), s(4, 2))
+        assertEquals(p(0, 0), out[1])
+        assertEquals(p(0, 2), out[2])
+    }
+
+    // ---- WidgetEntry v2 serialization ----
+
+    @Test
+    fun `v2 round trip keeps position`() {
+        val e = WidgetEntry(
+            7, "pkg", "Cls", 0, 4, 2, "title", col = 0, row = 3,
+        )
+        val back = WidgetEntry.deserialize(e.serialize())!!
+        assertEquals(e, back)
+        assertEquals(0, back.col)
+        assertEquals(3, back.row)
+    }
+
+    @Test
+    fun `legacy lines parse with unplaced position`() {
+        val e = WidgetEntry.deserialize("7;pkg;Cls;0;4;2;hello")!!
+        assertEquals(-1, e.col)
+        assertEquals(-1, e.row)
+        assertEquals("hello", e.title)
+        // Legacy 3-field form too.
+        assertEquals(-1, WidgetEntry.deserialize("7;pkg;Cls")!!.col)
+    }
+
+    @Test
+    fun `v2 title containing semicolon survives`() {
+        val e = WidgetEntry(
+            7, "pkg", "Cls", 1, 2, 1, "a;b;c", col = 2, row = 1,
+        )
+        val back = WidgetEntry.deserialize(e.serialize())!!
+        assertEquals("a;b;c", back.title)
+        assertEquals(p(2, 1), GridPos(back.col, back.row))
     }
 }
 
@@ -254,66 +325,3 @@ class DefaultHomeWidgetsTest {
     }
 }
 
-class DragReorderTest {
-    // Three 1x1 rects stacked vertically, 100px each with 10px gaps.
-    private val rects = listOf(
-        GridRect(0, 0, 100, 100),
-        GridRect(0, 110, 100, 210),
-        GridRect(0, 220, 100, 320),
-    )
-    private val order = listOf(1, 2, 3)
-    private val bottom = 320
-
-    @Test
-    fun `hitting another widget centre moves dragged to that index`() {
-        // Drag id 3 over rect[0]'s centre.
-        assertEquals(
-            listOf(3, 1, 2),
-            dragReorder(order, rects, 3, 50, 50, bottom),
-        )
-    }
-
-    @Test
-    fun `finger inside dragged widget own slot is unchanged`() {
-        assertEquals(order, dragReorder(order, rects, 2, 50, 160, bottom))
-    }
-
-    @Test
-    fun `edge margin is ignored`() {
-        // 2% inside rect[0]'s top edge — within the 15% hysteresis margin.
-        assertEquals(order, dragReorder(order, rects, 3, 50, 2, bottom))
-    }
-
-    @Test
-    fun `below content bottom moves to end`() {
-        assertEquals(
-            listOf(2, 3, 1),
-            dragReorder(order, rects, 1, 50, 400, bottom),
-        )
-    }
-
-    @Test
-    fun `already last below bottom is unchanged`() {
-        assertEquals(order, dragReorder(order, rects, 3, 50, 400, bottom))
-    }
-
-    @Test
-    fun `mixed layout tall over short neighbour`() {
-        // 4x2 at top (tall), then two 2x1 side by side.
-        val spans = listOf(GridSpan(4, 2), GridSpan(2, 1), GridSpan(2, 1))
-        val cellW = 100; val cellH = 100; val gap = 10
-        val positions = flowLayout(spans)
-        val rects = spans.mapIndexed { i, s ->
-            val p = positions[i]
-            val l = p.col * (cellW + gap); val t = p.row * (cellH + gap)
-            GridRect(l, t, l + s.cols * cellW + (s.cols - 1) * gap,
-                     t + s.rows * cellH + (s.rows - 1) * gap)
-        }
-        // Drag the tall 4x2 (id 1) over the second 2x1 (id 3) -> index 2.
-        assertEquals(
-            listOf(2, 3, 1),
-            dragReorder(listOf(1, 2, 3), rects, 1,
-                        3 * cellW, 2 * cellH + gap + cellH / 2, rects.last().bottom),
-        )
-    }
-}

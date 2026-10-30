@@ -11,6 +11,7 @@ import android.view.MotionEvent
 import android.view.ViewConfiguration
 import kotlin.math.abs
 import com.vibiate.launcher.data.CustomScreen
+import com.vibiate.launcher.data.PageShortcut
 import com.vibiate.launcher.data.SettingsRepository
 import com.vibiate.launcher.data.WidgetEntry
 import kotlinx.coroutines.CoroutineScope
@@ -36,6 +37,9 @@ class WidgetController(
 
     private val _widgets = MutableStateFlow<List<WidgetEntry>>(emptyList())
     val widgets: StateFlow<List<WidgetEntry>> = _widgets
+
+    private val _shortcuts = MutableStateFlow<List<PageShortcut>>(emptyList())
+    val shortcuts: StateFlow<List<PageShortcut>> = _shortcuts
 
     // restore() rewrites _widgets from DataStore asynchronously; running it on
     // every ON_START lets a stale read clobber a widget added while an opaque
@@ -130,7 +134,9 @@ class WidgetController(
             .filter { it.screenId == screenId }
             .forEach { discardId(it.appWidgetId) }
         _widgets.value = _widgets.value.filterNot { it.screenId == screenId }
+        _shortcuts.value = _shortcuts.value.filterNot { it.screenId == screenId }
         persist()
+        persistShortcuts()
         scope.launch {
             val screens = settings.customScreens.first()
             settings.setCustomScreens(screens.filterNot { it.id == screenId })
@@ -142,10 +148,88 @@ class WidgetController(
         return host.createView(context, entry.appWidgetId, info)
     }
 
-    /** Reorder [screenId]'s widgets in place within the global list. */
-    fun moveWidgets(screenId: Int, orderedIds: List<Int>) {
-        _widgets.value = mergeScreenOrder(_widgets.value, screenId, orderedIds)
+    /**
+     * Persist fixed grid positions for [screenId]'s items; [spans] also
+     * freezes explicit widget spans. Negative position keys (-shortcut.id)
+     * update page shortcuts pushed around by widget moves/resizes.
+     */
+    fun placeWidgets(
+        screenId: Int,
+        positions: Map<Int, GridPos>,
+        spans: Map<Int, GridSpan> = emptyMap(),
+    ) {
+        _widgets.value = _widgets.value.map {
+            if (it.screenId != screenId) {
+                it
+            } else {
+                val pos = positions[it.appWidgetId]
+                val span = spans[it.appWidgetId]
+                it.copy(
+                    col = pos?.col ?: it.col,
+                    row = pos?.row ?: it.row,
+                    cols = span?.cols ?: it.cols,
+                    rows = span?.rows ?: it.rows,
+                )
+            }
+        }
+        _shortcuts.value = _shortcuts.value.map {
+            if (it.screenId != screenId) {
+                it
+            } else {
+                val pos = positions[shortcutGridId(it.id)]
+                it.copy(col = pos?.col ?: it.col, row = pos?.row ?: it.row)
+            }
+        }
         persist()
+        persistShortcuts()
+    }
+
+    /**
+     * Land a shortcut for [componentKey] at the position [positions] gives it
+     * on [screenId] (keys are grid ids: appWidgetId, -shortcut.id — the same
+     * map the drop preview produced). The same app already on this screen
+     * moves instead of duplicating; [movingShortcutId] carries a dragged
+     * shortcut onto this screen; widget positions in the map shift too.
+     */
+    fun dropShortcut(
+        screenId: Int,
+        componentKey: String,
+        positions: Map<Int, GridPos>,
+        movingShortcutId: Int? = null,
+    ) {
+        val id = shortcutDropId(
+            sameComponentId = _shortcuts.value.firstOrNull {
+                it.screenId == screenId && it.componentKey == componentKey
+            }?.id,
+            movingShortcutId = movingShortcutId,
+            nextId = (_shortcuts.value.maxOfOrNull { it.id } ?: 0) + 1,
+        )
+        val targetPos = positions[shortcutGridId(id)] ?: return
+        val existing = _shortcuts.value.firstOrNull { it.id == id }
+        // A dragged shortcut merging into the same app on this page is moved,
+        // not copied: drop the source.
+        val list = _shortcuts.value
+            .filterNot { movingShortcutId != null && movingShortcutId != id && it.id == movingShortcutId }
+            .toMutableList()
+        if (existing != null) {
+            list[list.indexOf(existing)] = existing.copy(
+                screenId = screenId,
+                col = targetPos.col,
+                row = targetPos.row,
+            )
+        } else {
+            list += PageShortcut(id, componentKey, screenId, targetPos.col, targetPos.row)
+        }
+        _shortcuts.value = list
+        // Persist widget positions + all other shortcut positions for the
+        // page through the shared path.
+        placeWidgets(screenId, positions)
+        persistShortcuts()
+    }
+
+    fun removeShortcut(id: Int) {
+        _shortcuts.value = _shortcuts.value.filterNot { it.id == id }
+        persistShortcuts()
     }
 
     /** True once the persisted widget list has been restored at startup. */
@@ -156,6 +240,7 @@ class WidgetController(
         // Drop entries whose ids are no longer bound (e.g. provider uninstalled).
         val valid = saved.filter { providerInfo(it.appWidgetId) != null }
         _widgets.value = valid
+        _shortcuts.value = settings.shortcuts.first()
         if (valid.size != saved.size) settings.setWidgets(valid)
         restoredFlow.value = true
     }
@@ -163,6 +248,11 @@ class WidgetController(
     private fun persist() {
         val snapshot = _widgets.value
         scope.launch { settings.setWidgets(snapshot) }
+    }
+
+    private fun persistShortcuts() {
+        val snapshot = _shortcuts.value
+        scope.launch { settings.setShortcuts(snapshot) }
     }
 
     companion object {

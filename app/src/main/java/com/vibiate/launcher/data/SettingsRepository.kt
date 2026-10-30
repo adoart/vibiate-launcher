@@ -26,11 +26,13 @@ class SettingsRepository(private val context: Context) {
         val WP_URIS = stringPreferencesKey("wallpaper_uris") // newline-joined, ordered
         val WP_INDEX = intPreferencesKey("wallpaper_index")
         val WIDGETS = stringPreferencesKey("widgets") // newline-joined WidgetEntry.serialize()
+        val SHORTCUTS = stringPreferencesKey("page_shortcuts") // newline-joined PageShortcut.serialize()
         val CUSTOM_SCREENS = stringPreferencesKey("custom_screens") // newline-joined CustomScreen.serialize()
         val HOME_WIDGETS_SEEDED = booleanPreferencesKey("home_widgets_seeded")
         val GRID_SIZE = intPreferencesKey("grid_size")
         val FONT_FAMILY = stringPreferencesKey("font_family") // LauncherFont.name
         val CUSTOM_CATEGORIES = stringPreferencesKey("custom_categories") // newline-joined UserCategory.serialize()
+        val DOCK_APPS = stringPreferencesKey("dock_apps") // newline-joined componentKeys; absent = auto
         val CATEGORY_OVERRIDES = stringPreferencesKey("category_overrides") // newline-joined "componentKey=categoryKey"
         val CATEGORY_ORDER = stringPreferencesKey("category_order") // newline-joined category keys
         val APP_ORDER = stringPreferencesKey("app_order") // newline-joined "categoryKey=ck1|ck2|..."
@@ -160,6 +162,17 @@ class SettingsRepository(private val context: Context) {
         store.edit { it[Keys.WIDGETS] = entries.joinToString("\n") { e -> e.serialize() } }
     }
 
+    // ---- Page shortcuts (app icons pinned to widget pages) ----
+
+    val shortcuts: Flow<List<PageShortcut>> = store.data.map {
+        it[Keys.SHORTCUTS]?.split('\n')
+            ?.mapNotNull { s -> PageShortcut.deserialize(s) } ?: emptyList()
+    }
+
+    suspend fun setShortcuts(entries: List<PageShortcut>) {
+        store.edit { it[Keys.SHORTCUTS] = entries.joinToString("\n") { e -> e.serialize() } }
+    }
+
     // ---- Custom screens (extra widget spaces) ----
 
     /** User-created pager pages, in order. Ids start at 1; 0 = built-in Widgets. */
@@ -272,6 +285,18 @@ class SettingsRepository(private val context: Context) {
     val categoryOrder: Flow<List<String>> = store.data.map {
         it[Keys.CATEGORY_ORDER]?.split('\n')?.filter { s -> s.isNotBlank() }
             ?: emptyList()
+    }
+
+    /** Persisted dock order; null = the user never customised (auto-resolve). */
+    val dockApps: Flow<List<String?>?> = store.data.map { decodeDockApps(it[Keys.DOCK_APPS]) }
+
+    suspend fun setDockApps(keys: List<String?>) {
+        store.edit { it[Keys.DOCK_APPS] = encodeDockApps(keys) }
+    }
+
+    /** Remove the persisted dock so automatic resolution is used again. */
+    suspend fun clearDockApps() {
+        store.edit { it.remove(Keys.DOCK_APPS) }
     }
 
     suspend fun setCategoryOrder(keys: List<String>) {

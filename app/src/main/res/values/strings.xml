@@ -30,8 +30,12 @@
     <string name="cancel">Cancel</string>
 
     <!-- Dock -->
+    <string name="dock_remove">Remove from dock</string>
+    <string name="dock_app_info">App info</string>
     <string name="dock_expand">Expand dock</string>
     <string name="dock_collapse">Collapse dock</string>
+    <string name="dock_reset">Reset dock</string>
+    <string name="dock_reset_subtitle">Restore the default dock apps</string>
 
     <!-- Customize sheet (long-press empty space) -->
     <string name="customize_title">Customize</string>

@@ -1,6 +1,5 @@
 package com.vibiate.launcher.widget
 
-import com.vibiate.launcher.data.WidgetEntry
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
@@ -90,73 +89,103 @@ fun clampSpan(
 fun pxToCells(px: Int, density: Float, cellDp: Float): Int =
     if (px <= 0) 0 else ceil((px / density + 16f) / cellDp).toInt()
 
-/** Axis-aligned rect on the widget grid, in pixels. */
-data class GridRect(val left: Int, val top: Int, val right: Int, val bottom: Int)
+/** Page shortcuts share the widget grid as negative ids (always span 1×1). */
+fun shortcutGridId(id: Int): Int = -id
+fun shortcutIdOf(gridId: Int): Int? = if (gridId < 0) -gridId else null
 
 /**
- * Index of the rect whose inner 70% contains ([x], [y]), else null. The 15%
- * edge margin is hysteresis so reorders don't oscillate between slots.
+ * The shortcut id a drop acts on: a shortcut for the same app already on the
+ * page moves it (no duplicates), then the dragged shortcut, else a fresh id.
  */
-fun hitIndex(rects: List<GridRect>, x: Int, y: Int): Int? =
-    rects.indexOfFirst { r ->
-        val mx = (r.right - r.left) * 0.15f
-        val my = (r.bottom - r.top) * 0.15f
-        x >= r.left + mx && x <= r.right - mx &&
-            y >= r.top + my && y <= r.bottom - my
-    }.takeIf { it >= 0 }
+fun shortcutDropId(
+    sameComponentId: Int?,
+    movingShortcutId: Int?,
+    nextId: Int,
+): Int = sameComponentId ?: movingShortcutId ?: nextId
 
 /**
- * Order after the dragged widget is held at ([x], [y]); [rects] are the
- * current layout rects parallel to [order]. Hitting another widget's inner
- * area moves the dragged one to that index; below [contentBottom] moves it
- * to the end; otherwise unchanged.
+ * Positions after a 1×1 shortcut lands at [target] on [items] (widgets by
+ * appWidgetId, shortcuts by -id): the drop point is clamped onto the grid
+ * and colliders are pushed down. Used for both the live preview and the
+ * committed drop so they always agree.
  */
-fun dragReorder(
-    order: List<Int>,
-    rects: List<GridRect>,
-    dragId: Int,
-    x: Int,
-    y: Int,
-    contentBottom: Int,
-): List<Int> {
-    val cur = order.indexOf(dragId)
-    if (cur < 0) return order
-    val hit = hitIndex(rects, x, y)
-    return when {
-        hit != null && hit != cur -> order.moved(cur, hit)
-        y > contentBottom -> order.moved(cur, order.size - 1)
-        else -> order
+fun dropPlacement(
+    items: Map<Int, Pair<GridPos, GridSpan>>,
+    movingGridId: Int,
+    target: GridPos,
+): Map<Int, GridPos> =
+    placeWithPushDown(items, movingGridId, target, GridSpan(1, 1))
+
+/** True when the span at [pos] overlaps any of [placed]. */
+private fun overlaps(
+    placed: Collection<Pair<GridPos, GridSpan>>,
+    pos: GridPos,
+    span: GridSpan,
+): Boolean = placed.any { (p, s) ->
+    pos.col < p.col + s.cols && p.col < pos.col + span.cols &&
+        pos.row < p.row + s.rows && p.row < pos.row + span.rows
+}
+
+/**
+ * First free spot in row-major order where [span] fits on [columns] without
+ * overlapping [placed].
+ */
+fun firstFreeSpot(
+    placed: List<Pair<GridPos, GridSpan>>,
+    span: GridSpan,
+    columns: Int = WIDGET_COLUMNS,
+): GridPos {
+    val s = GridSpan(span.cols.coerceIn(1, columns), span.rows.coerceAtLeast(1))
+    var row = 0
+    while (true) {
+        for (col in 0..columns - s.cols) {
+            val pos = GridPos(col, row)
+            if (!overlaps(placed, pos, s)) return pos
+        }
+        row++
     }
 }
 
-/** Move the element at [from] to [to]; unchanged list for invalid indices. */
-fun <T> List<T>.moved(from: Int, to: Int): List<T> {
-    if (from !in indices || from == to) return this
-    val l = toMutableList()
-    val t = l.removeAt(from)
-    l.add(to.coerceIn(0, l.size), t)
-    return l
-}
-
 /**
- * Reinsert one screen's widgets in [orderedIds] order into the global list,
- * keeping other screens' entries at their relative positions.
+ * Positions after [movedId] is dropped at [target]: it is clamped onto the
+ * grid (col to 0..columns − span.cols, row ≥ 0), then the other items in
+ * (row, col) order keep their spot unless they overlap something already
+ * placed — they slide straight down to the first free row. Deterministic;
+ * items that don't collide never move.
  */
-fun mergeScreenOrder(
-    all: List<WidgetEntry>,
-    screenId: Int,
-    orderedIds: List<Int>,
-): List<WidgetEntry> {
-    val byId = all.associateBy { it.appWidgetId }
-    val queued = orderedIds.mapNotNull { byId[it] }
-        .filter { it.screenId == screenId }
-    val queuedIds = queued.mapTo(HashSet()) { it.appWidgetId }
-    // Named entries first; any screen entries not listed keep their original
-    // relative order in the remaining slots.
-    val queue = ArrayDeque(
-        queued + all.filter { it.screenId == screenId && it.appWidgetId !in queuedIds }
+fun placeWithPushDown(
+    items: Map<Int, Pair<GridPos, GridSpan>>,
+    movedId: Int,
+    target: GridPos,
+    movedSpan: GridSpan,
+    columns: Int = WIDGET_COLUMNS,
+): Map<Int, GridPos> {
+    val span = GridSpan(
+        movedSpan.cols.coerceIn(1, columns),
+        movedSpan.rows.coerceAtLeast(1),
     )
-    return all.map { e ->
-        if (e.screenId == screenId) queue.removeFirstOrNull() ?: e else e
-    }
+    val placed = LinkedHashMap<Int, Pair<GridPos, GridSpan>>()
+    placed[movedId] = GridPos(
+        target.col.coerceIn(0, columns - span.cols),
+        target.row.coerceAtLeast(0),
+    ) to span
+    items.entries
+        .filter { it.key != movedId }
+        .sortedWith(compareBy({ it.value.first.row }, { it.value.first.col }))
+        .forEach { (id, ps) ->
+            val (p, s) = ps
+            val sp = GridSpan(
+                s.cols.coerceIn(1, columns),
+                s.rows.coerceAtLeast(1),
+            )
+            var pos = GridPos(
+                p.col.coerceIn(0, columns - sp.cols),
+                p.row.coerceAtLeast(0),
+            )
+            while (overlaps(placed.values, pos, sp)) {
+                pos = pos.copy(row = pos.row + 1)
+            }
+            placed[id] = pos to sp
+        }
+    return placed.mapValues { it.value.first }
 }
