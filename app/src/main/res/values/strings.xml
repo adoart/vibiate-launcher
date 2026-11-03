@@ -17,6 +17,12 @@
     <!-- Widget spaces -->
     <string name="add_widget">Add widget</string>
     <string name="no_widgets">No widgets yet</string>
+    <string name="search_hint">Search</string>
+    <string name="no_widgets_found">No widgets found</string>
+    <plurals name="widget_count">
+        <item quantity="one">%d widget</item>
+        <item quantity="other">%d widgets</item>
+    </plurals>
     <string name="widget_add_hint">Long-press the wallpaper to add one</string>
     <string name="remove_widget">Remove widget</string>
     <string name="widget_rename">Rename</string>

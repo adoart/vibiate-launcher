@@ -38,6 +38,7 @@ fun HomeScreen(
     onDockRemove: (String) -> Unit = {},
     editBlur: Float = 0f,
     onEditingChange: (Boolean) -> Unit = {},
+    exitEditRequest: Int = 0,
 ) {
     val homeWidgets by controller.widgets.collectAsState()
     val homeShortcuts by controller.shortcuts.collectAsState()
@@ -58,6 +59,7 @@ fun HomeScreen(
             showEmptyState = false,
             editBlur = editBlur,
             onEditingChange = onEditingChange,
+            exitEditRequest = exitEditRequest,
         )
         if (!hasWidgets) {
             Text(

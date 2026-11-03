@@ -325,3 +325,60 @@ class DefaultHomeWidgetsTest {
     }
 }
 
+
+class WidgetCatalogTest {
+
+    private fun opt(pkg: String, app: String, label: String, desc: String? = null) =
+        WidgetOption(
+            android.content.ComponentName(pkg, "C"), pkg, app, label, desc,
+            GridSpan(1, 1),
+        )
+
+    @Test
+    fun `groupWidgets groups by package and sorts`() {
+        val out = groupWidgets(listOf(
+            opt("b.B", "beta", "w2"), opt("a.A", "Alpha", "w2"),
+            opt("a.A", "Alpha", "w1"), opt("C.C", "charlie", "w"),
+        ))
+        assertEquals(listOf("Alpha", "beta", "charlie"), out.map { it.appLabel })
+        assertEquals(listOf("w1", "w2"), out[0].widgets.map { it.label })
+    }
+
+    @Test
+    fun `filterWidgets blank keeps all`() {
+        val g = groupWidgets(listOf(opt("a", "Alpha", "x")))
+        assertEquals(g, filterWidgets(g, "   "))
+    }
+
+    @Test
+    fun `filterWidgets app match keeps all its widgets`() {
+        val g = groupWidgets(listOf(
+            opt("a", "Alpha", "x"), opt("a", "Alpha", "y"),
+            opt("b", "beta", "z"),
+        ))
+        val out = filterWidgets(g, "ALPHA")
+        assertEquals(1, out.size)
+        assertEquals(2, out[0].widgets.size)
+    }
+
+    @Test
+    fun `filterWidgets widget or description match`() {
+        val g = groupWidgets(listOf(
+            opt("a", "Alpha", "Switch users", "quick toggle"),
+            opt("b", "beta", "Clock"),
+        ))
+        assertEquals(listOf("Switch users"),
+            filterWidgets(g, "switch")[0].widgets.map { it.label })
+        assertEquals(listOf("Switch users"),
+            filterWidgets(g, "toggle")[0].widgets.map { it.label })
+        assertEquals(emptyList<WidgetGroup>(), filterWidgets(g, "zzz"))
+    }
+
+    @Test
+    fun `fitPreview scales only when needed`() {
+        assertEquals(1f, fitPreview(100, 100, 200f, 200f))
+        assertEquals(0.5f, fitPreview(400, 200, 200f, 400f))
+        assertEquals(0.5f, fitPreview(200, 400, 400f, 200f))
+        assertEquals(1f, fitPreview(0, 0, 10f, 10f))
+    }
+}

@@ -1,6 +1,7 @@
 package com.vibiate.launcher.ui
 
 import android.app.Activity
+import android.content.ComponentName
 import android.content.Context
 import android.content.ContextWrapper
 import android.os.Build
@@ -39,6 +40,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateMapOf
@@ -80,6 +82,7 @@ import com.vibiate.launcher.data.WallpaperRotator
 import com.vibiate.launcher.ui.components.LauncherDock
 import com.vibiate.launcher.ui.components.LauncherTab
 import com.vibiate.launcher.ui.components.LauncherTopBar
+import com.vibiate.launcher.ui.components.WidgetPickerSheet
 import com.vibiate.launcher.ui.components.toImageBitmap
 import com.vibiate.launcher.ui.drag.DragDropState
 import com.vibiate.launcher.ui.drag.DragPayload
@@ -106,8 +109,8 @@ fun LauncherRoot(
     dockRepository: DockRepository,
     /** Emits when HOME is pressed while the launcher is in front. */
     homeEvents: Flow<Unit>,
-    /** Start the widget pick flow for the given screen id (0 = built-in Widgets). */
-    onAddWidget: (Int) -> Unit,
+    /** Bind+place the picked widget on the given screen (0 = built-in Widgets). */
+    onAddWidget: (screenId: Int, provider: ComponentName, cols: Int, rows: Int) -> Unit,
     /** Settings -> "Restore default Home widgets". */
     onRestoreHomeWidgets: () -> Unit = {},
 ) {
@@ -165,10 +168,14 @@ fun LauncherRoot(
     }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showCustomize by rememberSaveable { mutableStateOf(false) }
+    var widgetPickerTarget by remember { mutableStateOf<Int?>(null) }
     // Each composed page reports editing independently — adjacent pages
     // would otherwise overwrite each other's onEditingChange(false).
     val widgetEditingByPage = remember { mutableStateMapOf<Int, Boolean>() }
     val widgetEditing = widgetEditingByPage.values.any { it }
+    // Bumped when a tap lands on the dock/top bar while editing — every
+    // WidgetsScreen watches it to exit its own edit mode.
+    var exitEditRequest by remember { mutableIntStateOf(0) }
     // OxygenOS-style backdrop blur while a widget is edited/moved.
     val editBlur by animateFloatAsState(
         targetValue = if (widgetEditing) 1f else 0f,
@@ -357,6 +364,20 @@ fun LauncherRoot(
                     },
                     onSettingsClick = { showSettings = true },
                 )
+                // While a widget is edited, taps/long-presses on the top
+                // bar only request an edit-mode exit.
+                if (widgetEditing) {
+                    Box(
+                        Modifier
+                            .matchParentSize()
+                            .pointerInput(Unit) {
+                                detectTapGestures(
+                                    onTap = { exitEditRequest++ },
+                                    onLongPress = { exitEditRequest++ },
+                                )
+                            },
+                    )
+                }
                 }
                 // Long-press on empty space anywhere opens the customize sheet.
                 // Icons/widgets consume their own long-presses first (Main pass
@@ -421,6 +442,7 @@ fun LauncherRoot(
                                         onEditingChange = {
                                             widgetEditingByPage[page] = it
                                         },
+                                        exitEditRequest = exitEditRequest,
                                     )
                                     LauncherTab.WIDGETS -> WidgetsScreen(
                                         controller = widgetController,
@@ -439,6 +461,7 @@ fun LauncherRoot(
                                         onEditingChange = {
                                             widgetEditingByPage[page] = it
                                         },
+                                        exitEditRequest = exitEditRequest,
                                     )
                                     LauncherTab.COLLECTIONS -> CollectionsScreen(
                                         repository = appRepository,
@@ -486,6 +509,7 @@ fun LauncherRoot(
                                         onEditingChange = {
                                             widgetEditingByPage[page] = it
                                         },
+                                        exitEditRequest = exitEditRequest,
                                         onRemoveScreen = {
                                             widgetController.removeScreen(screen.id)
                                         },
@@ -512,6 +536,20 @@ fun LauncherRoot(
                                 widgetController.removeShortcut(it)
                             },
                         )
+                        if (widgetEditing) {
+                            Box(
+                                Modifier
+                                    .matchParentSize()
+                                    .pointerInput(Unit) {
+                                        detectTapGestures(
+                                            onTap = { exitEditRequest++ },
+                                            onLongPress = {
+                                                exitEditRequest++
+                                            },
+                                        )
+                                    },
+                            )
+                        }
                     }
                 }
             }
@@ -583,7 +621,7 @@ fun LauncherRoot(
                     // a custom space -> its id; anywhere else -> Widgets page
                     // after paging to it.
                     val page = pagerState.currentPage
-                    val target = when {
+                    widgetPickerTarget = when {
                         page == LauncherTab.HOME.ordinal -> HOME_SCREEN_ID
                         page == LauncherTab.WIDGETS.ordinal -> 0
                         page in builtInCount until builtInCount + customScreens.size ->
@@ -598,8 +636,20 @@ fun LauncherRoot(
                             pagerState.animateScrollToPage(LauncherTab.WIDGETS.ordinal)
                         }
                     }
-                    onAddWidget(target)
                 },
+            )
+        }
+
+        widgetPickerTarget?.let { target ->
+            WidgetPickerSheet(
+                onPick = { option ->
+                    widgetPickerTarget = null
+                    onAddWidget(
+                        target, option.provider,
+                        option.span.cols, option.span.rows,
+                    )
+                },
+                onDismiss = { widgetPickerTarget = null },
             )
         }
 

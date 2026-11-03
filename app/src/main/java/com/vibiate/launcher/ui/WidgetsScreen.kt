@@ -43,6 +43,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -152,6 +153,8 @@ fun WidgetsScreen(
     /** 0..1 background-blur fraction while a widget is edited (OxygenOS). */
     editBlur: Float = 0f,
     onEditingChange: (Boolean) -> Unit = {},
+    /** Bump from LauncherRoot when a dock/top-bar tap should exit edit. */
+    exitEditRequest: Int = 0,
 ) {
     val allWidgets by controller.widgets.collectAsState()
     val widgets = allWidgets.filter { it.screenId == screenId }
@@ -214,6 +217,25 @@ fun WidgetsScreen(
     SideEffect { if (editId != effectiveEditId) editId = effectiveEditId }
     SideEffect { onEditingChange(effectiveEditId != null || moving) }
 
+    val pageEditing = effectiveEditId != null || moving
+    val exitEdit = {
+        editId = null
+        previewSpan = null
+        movingId = null
+        movePreview = null
+        dragStartItems = null
+        menuId = null
+    }
+    // React only to bumps after first composition, so composing a page
+    // never exits edit mode by itself.
+    var lastExitRequest by remember { mutableIntStateOf(exitEditRequest) }
+    LaunchedEffect(exitEditRequest) {
+        if (exitEditRequest != lastExitRequest) {
+            lastExitRequest = exitEditRequest
+            exitEdit()
+        }
+    }
+
     // Edge auto-scroll while moving (same 64dp rule as Collections).
     LaunchedEffect(moving) {
         val edge = with(density) { 64.dp.toPx() }
@@ -226,12 +248,8 @@ fun WidgetsScreen(
         }
     }
 
-    BackHandler(enabled = effectiveEditId != null || moving) {
-        editId = null
-        previewSpan = null
-        movingId = null
-        movePreview = null
-        dragStartItems = null
+    BackHandler(enabled = pageEditing) {
+        exitEdit()
     }
 
     Column(
@@ -250,15 +268,9 @@ fun WidgetsScreen(
             // (wallpaper long-press -> Customize). Host views swallow their
             // own taps, so tapping a widget never reaches this anyway.
             .then(
-                if (effectiveEditId != null || moving) {
+                if (pageEditing) {
                     Modifier.pointerInput(Unit) {
-                        detectTapGestures {
-                            editId = null
-                            previewSpan = null
-                            movingId = null
-                            movePreview = null
-                            dragStartItems = null
-                        }
+                        detectTapGestures { exitEdit() }
                     }
                 } else {
                     Modifier
@@ -565,6 +577,7 @@ fun WidgetsScreen(
                     content = {
                         orderedWidgets.forEach { entry ->
                             key(entry.appWidgetId) {
+                                Box {
                                 WidgetCell(
                                     entry = entry,
                                     info = infos[entry.appWidgetId],
@@ -679,6 +692,25 @@ fun WidgetsScreen(
                                         )
                                     },
                                 )
+                                // While editing, a tap on another widget
+                                // only exits edit — never launches its app.
+                                if (pageEditing &&
+                                    entry.appWidgetId != effectiveEditId
+                                ) {
+                                    Box(
+                                        Modifier
+                                            .matchParentSize()
+                                            .pointerInput(Unit) {
+                                                detectTapGestures(
+                                                    onTap = { exitEdit() },
+                                                    onLongPress = {
+                                                        exitEdit()
+                                                    },
+                                                )
+                                            },
+                                    )
+                                }
+                                }
                             }
                         }
                         shortcutCells.forEach { (shortcut, app) ->
@@ -686,6 +718,7 @@ fun WidgetsScreen(
                                 // Keep the source cell composed while its
                                 // icon is dragged (hidden, not removed) —
                                 // disposing the node kills the gesture.
+                                Box {
                                 ShortcutCell(
                                     shortcut = shortcut,
                                     app = app,
@@ -705,6 +738,21 @@ fun WidgetsScreen(
                                     },
                                     onLaunch = { onLaunch(app) },
                                 )
+                                if (pageEditing) {
+                                    Box(
+                                        Modifier
+                                            .matchParentSize()
+                                            .pointerInput(Unit) {
+                                                detectTapGestures(
+                                                    onTap = { exitEdit() },
+                                                    onLongPress = {
+                                                        exitEdit()
+                                                    },
+                                                )
+                                            },
+                                    )
+                                }
+                                }
                             }
                         }
                         if (movingId != null || pendingDrop != null) {

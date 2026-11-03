@@ -38,11 +38,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private val pickWidgetLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            onWidgetPickResult(result)
-        }
-
     private val bindWidgetLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             onWidgetBindResult(result)
@@ -86,7 +81,7 @@ class MainActivity : ComponentActivity() {
                 wallpaperRotator = app.wallpaperRotator,
                 dockRepository = app.dockRepository,
                 homeEvents = homeEvents,
-                onAddWidget = ::startWidgetPick,
+                onAddWidget = ::addWidgetFromPicker,
                 onRestoreHomeWidgets = ::restoreHomeWidgets,
             )
         }
@@ -177,49 +172,32 @@ class MainActivity : ComponentActivity() {
         seedHomeWidgets(pickDefaultHomeSpecs(this, app.widgetController))
     }
 
-    private fun startWidgetPick(screenId: Int) {
-        // Don't interleave a manual pick with a seed flow.
+    /**
+     * The in-app picker chose a widget: allocate an id and go straight to
+     * bind (the same path seeding uses), carrying the picker's span so the
+     * placed widget matches the preview.
+     */
+    fun addWidgetFromPicker(
+        screenId: Int,
+        provider: ComponentName,
+        cols: Int,
+        rows: Int,
+    ) {
         if (seeding) return
         pendingScreenId = screenId
-        pendingCols = 0
-        pendingRows = 0
-        pendingWidgetId = app.widgetController.allocateId()
-        pickWidgetLauncher.launch(
-            Intent(AppWidgetManager.ACTION_APPWIDGET_PICK)
-                .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, pendingWidgetId)
-        )
-    }
-
-    private fun onWidgetPickResult(result: ActivityResult) {
-        val data = result.data
-        // A cancelled pick returns null data (or appWidgetId=0); the pending
-        // fallback is required or the allocated id would leak.
-        val id = data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1)
-            ?.takeIf { it > 0 } ?: pendingWidgetId
-        val provider = data?.providerComponent()
-            ?: app.widgetController.providerInfo(id)?.provider
+        pendingCols = cols
+        pendingRows = rows
         pendingProvider = provider
-        if (result.resultCode != RESULT_OK) {
-            app.widgetController.discardId(id)
-            endWidgetFlow()
-            return
-        }
-        if (app.widgetController.providerInfo(id) != null) {
-            // The Settings picker bound the widget itself before returning.
+        val id = app.widgetController.allocateId()
+        pendingWidgetId = id
+        if (app.widgetController.bindIfAllowed(id, provider)) {
             finishWidgetAdd(id)
-        } else if (provider != null) {
-            if (app.widgetController.bindIfAllowed(id, provider)) {
-                finishWidgetAdd(id)
-            } else {
-                bindWidgetLauncher.launch(
-                    Intent(AppWidgetManager.ACTION_APPWIDGET_BIND)
-                        .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
-                        .putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER, provider)
-                )
-            }
         } else {
-            app.widgetController.discardId(id)
-            endWidgetFlow()
+            bindWidgetLauncher.launch(
+                Intent(AppWidgetManager.ACTION_APPWIDGET_BIND)
+                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER, provider)
+            )
         }
     }
 
