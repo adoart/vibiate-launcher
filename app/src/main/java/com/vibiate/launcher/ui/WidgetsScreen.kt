@@ -775,7 +775,13 @@ fun WidgetsScreen(
                     },
                 ) { measurables, constraints ->
                     val gapPx = gridGap.roundToPx()
-                    val cellWPx = cellW.roundToPx()
+                    // Cell width from the real width, not a rounded dp value:
+                    // rounding up made a 4-column span 1px wider than the
+                    // grid on some densities.
+                    val cellWF = (constraints.maxWidth - gapPx * (WIDGET_COLUMNS - 1))
+                        .toFloat() / WIDGET_COLUMNS
+                    val spanW = { cols: Int -> (cols * cellWF + (cols - 1) * gapPx).roundToInt() }
+                    val colX = { col: Int -> (col * (cellWF + gapPx)).roundToInt() }
                     val cellHPx = cellHeight.roundToPx()
                     val n = orderedWidgets.size
                     val m = shortcutCells.size
@@ -793,7 +799,7 @@ fun WidgetsScreen(
                         }
                         ms.measure(
                             Constraints.fixed(
-                                s.cols * cellWPx + (s.cols - 1) * gapPx,
+                                spanW(s.cols),
                                 s.rows * cellHPx + (s.rows - 1) * gapPx,
                             )
                         )
@@ -827,7 +833,7 @@ fun WidgetsScreen(
                                 val gp = dropTarget
                                     ?: posOf(movingId ?: -1)
                                 p.place(
-                                    gp.col * (cellWPx + gapPx),
+                                    colX(gp.col),
                                     gp.row * (cellHPx + gapPx),
                                 )
                             } else if (i == dragIdx && movingId != null) {
@@ -838,7 +844,9 @@ fun WidgetsScreen(
                                     grabOffset.y
                                 p.place(
                                     fx.roundToInt().coerceIn(
-                                        0, constraints.maxWidth - p.width,
+                                        0,
+                                        (constraints.maxWidth - p.width)
+                                            .coerceAtLeast(0),
                                     ),
                                     fy.roundToInt().coerceAtLeast(0),
                                     zIndex = 2f,
@@ -854,7 +862,7 @@ fun WidgetsScreen(
                                     )
                                 }
                                 p.place(
-                                    gp.col * (cellWPx + gapPx),
+                                    colX(gp.col),
                                     gp.row * (cellHPx + gapPx),
                                 )
                             }
