@@ -86,7 +86,10 @@ fun buildCollections(
     overrides: Map<String, String>,
     categoryOrder: List<String> = emptyList(),
     appOrder: Map<String, List<String>> = emptyMap(),
+    hidden: Set<String> = emptySet(),
 ): List<Pair<CollectionDef, List<AppEntry>>> {
+    val shown = if (hidden.isEmpty()) apps
+    else apps.filterNot { it.componentKey in hidden }
     val customKeys = custom.mapTo(HashSet()) { it.key }
     val builtInNames = AppCategory.entries.mapTo(HashSet()) { it.name }
 
@@ -99,7 +102,7 @@ fun buildCollections(
         }
     }
 
-    val byKey = apps.groupBy(::effectiveKey)
+    val byKey = shown.groupBy(::effectiveKey)
 
     val default = mutableListOf<Pair<CollectionDef, List<AppEntry>>>()
     custom.forEach { cat ->

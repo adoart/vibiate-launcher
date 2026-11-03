@@ -367,6 +367,9 @@ private fun DockRow(
             Box(
                 Modifier
                     .weight(1f)
+                    // Fixed cell height: an empty slot has no content, and a
+                    // 0-height drop rect could never be hit.
+                    .height(56.dp)
                     .trackBounds(DockSlot(index)),
                 contentAlignment = Alignment.Center,
             ) {

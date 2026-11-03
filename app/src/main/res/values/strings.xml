@@ -17,6 +17,8 @@
     <!-- Widget spaces -->
     <string name="add_widget">Add widget</string>
     <string name="no_widgets">No widgets yet</string>
+    <string name="remove_from_collections">Remove from Collections</string>
+    <string name="show_in_collections">Show in Collections</string>
     <string name="search_hint">Search</string>
     <string name="no_widgets_found">No widgets found</string>
     <plurals name="widget_count">

@@ -104,6 +104,8 @@ fun AllAppsScreen(
 
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val hiddenApps by settings.hiddenFromCollections
+        .collectAsState(initial = emptySet())
 
     Column(Modifier.fillMaxSize()) {
         AviateSearchBar(
@@ -166,6 +168,23 @@ fun AllAppsScreen(
             title = { Text(app.label) },
             text = {
                 Column {
+                    if (app.componentKey in hiddenApps) {
+                        Text(
+                            text = stringResource(R.string.show_in_collections),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    menuApp = null
+                                    scope.launch {
+                                        settings.showInCollections(
+                                            listOf(app.componentKey),
+                                        )
+                                    }
+                                }
+                                .padding(vertical = 12.dp),
+                        )
+                    }
                     Text(
                         text = stringResource(R.string.change_icon),
                         color = MaterialTheme.colorScheme.onSurface,

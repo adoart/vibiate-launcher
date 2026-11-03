@@ -106,3 +106,51 @@ class CollectionsTest {
         assertEquals(listOf("x", "a", "b", "c"), list.withMoved("x", -5))
     }
 }
+
+class HiddenAppsTest {
+
+    private fun app(
+        key: String,
+        category: AppCategory = AppCategory.PRODUCTIVITY,
+    ): AppEntry = AppEntry("p", key, key, ColorDrawable(), category)
+
+    private fun ck(key: String) = "p/" + key
+
+    
+    @Test
+    fun `hidden app absent from every card, others keep order`() {
+        val apps = listOf(app("a"), app("b"), app("c"))
+        val out = buildCollections(apps, emptyList(), emptyMap(),
+            hidden = setOf(ck("b")))
+        val card = out.single { it.first.key == "PRODUCTIVITY" }
+        assertEquals(listOf("a", "c"), card.second.map { it.activityName })
+    }
+
+    @Test
+    fun `empty custom still shown, empty built-in disappears`() {
+        val apps = listOf(app("a"))
+        val custom = listOf(
+            UserCategory(1, "MINE", CategoryGlyph.STAR),
+        )
+        val out = buildCollections(
+            apps, custom,
+            mapOf(ck("a") to "custom:1"), hidden = setOf(ck("a")),
+        )
+        assertEquals(1, out.size)
+        assertEquals("custom:1", out[0].first.key)
+        assertEquals(emptyList<AppEntry>(), out[0].second)
+    }
+
+    
+    @Test
+    fun `hidden uninstalled key ignored, pinned order fine`() {
+        val apps = listOf(app("a"), app("b"))
+        val out = buildCollections(
+            apps, emptyList(), emptyMap(),
+            appOrder = mapOf("PRODUCTIVITY" to listOf("p/ghost", "p/b", "p/a")),
+            hidden = setOf("p/ghost"),
+        )
+        val card = out.single { it.first.key == "PRODUCTIVITY" }
+        assertEquals(listOf("b", "a"), card.second.map { it.activityName })
+    }
+}

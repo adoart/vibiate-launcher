@@ -107,14 +107,18 @@ fun CollectionsScreen(
     val overridesOrNull by settings.categoryOverrides.collectAsState(initial = null)
     val categoryOrderOrNull by settings.categoryOrder.collectAsState(initial = null)
     val appOrderOrNull by settings.appOrder.collectAsState(initial = null)
+    val hiddenOrNull by settings.hiddenFromCollections
+        .collectAsState(initial = null)
     val customCategories = customCategoriesOrNull.orEmpty()
     val overrides = overridesOrNull.orEmpty()
     val categoryOrder = categoryOrderOrNull.orEmpty()
     val appOrder = appOrderOrNull.orEmpty()
+    val hidden = hiddenOrNull.orEmpty()
     val settingsLoaded = customCategoriesOrNull != null &&
         overridesOrNull != null &&
         categoryOrderOrNull != null &&
-        appOrderOrNull != null
+        appOrderOrNull != null &&
+        hiddenOrNull != null
 
     // Expanded/collapsed per category key, surviving config change.
     val expandedState = rememberSaveable {
@@ -122,8 +126,13 @@ fun CollectionsScreen(
     }
     val expandedMap by expandedState
 
-    val collections = remember(apps, customCategories, overrides, categoryOrder, appOrder) {
-        buildCollections(apps, customCategories, overrides, categoryOrder, appOrder)
+    val collections = remember(
+        apps, customCategories, overrides, categoryOrder, appOrder, hidden,
+    ) {
+        buildCollections(
+            apps, customCategories, overrides, categoryOrder, appOrder,
+            hidden,
+        )
     }
 
     // Dialog state.
@@ -479,8 +488,9 @@ fun CollectionsScreen(
     }
 
     addAppsDef?.let { def ->
-        val initiallySelected = remember(def, overrides) {
-            overrides.filterValues { it == def.key }.keys
+        // Hidden apps start unticked so ticking them brings them back.
+        val initiallySelected = remember(def, overrides, hidden) {
+            overrides.filterValues { it == def.key }.keys - hidden
         }
         AddAppsDialog(
             category = def,
@@ -490,12 +500,13 @@ fun CollectionsScreen(
             onConfirm = { selected ->
                 addAppsDef = null
                 val inCategory = overrides
-                    .filterValues { it == def.key }.keys
+                    .filterValues { it == def.key }.keys - hidden
                 val toAdd = selected - inCategory
                 val toRemove = inCategory - selected
                 scope.launch {
                     if (toAdd.isNotEmpty()) settings.setOverrides(toAdd, def.key)
                     if (toRemove.isNotEmpty()) settings.setOverrides(toRemove, null)
+                    if (toAdd.isNotEmpty()) settings.showInCollections(toAdd)
                 }
             },
             onDismiss = { addAppsDef = null },
@@ -556,6 +567,14 @@ fun CollectionsScreen(
                         appMenuApp = null
                         iconPickApp = app
                     }
+                    DialogTextRow(
+                        stringResource(R.string.remove_from_collections),
+                    ) {
+                        appMenuApp = null
+                        scope.launch {
+                            settings.hideFromCollections(app.componentKey)
+                        }
+                    }
                     DialogTextRow(stringResource(R.string.app_info)) {
                         appMenuApp = null
                         openAppDetails(context, app)
@@ -581,7 +600,10 @@ fun CollectionsScreen(
             currentKey = currentKey,
             onSelect = { key ->
                 moveApp = null
-                scope.launch { settings.setOverride(app.componentKey, key) }
+                scope.launch {
+                    settings.setOverride(app.componentKey, key)
+                    settings.showInCollections(listOf(app.componentKey))
+                }
             },
             onDismiss = { moveApp = null },
         )

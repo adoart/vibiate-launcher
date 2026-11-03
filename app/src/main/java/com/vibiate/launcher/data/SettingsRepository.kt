@@ -36,6 +36,7 @@ class SettingsRepository(private val context: Context) {
         val CATEGORY_OVERRIDES = stringPreferencesKey("category_overrides") // newline-joined "componentKey=categoryKey"
         val CATEGORY_ORDER = stringPreferencesKey("category_order") // newline-joined category keys
         val APP_ORDER = stringPreferencesKey("app_order") // newline-joined "categoryKey=ck1|ck2|..."
+        val HIDDEN_APPS = stringPreferencesKey("collections_hidden") // newline-joined componentKeys
     }
 
     private val store get() = context.vibiateDataStore
@@ -308,6 +309,40 @@ class SettingsRepository(private val context: Context) {
         parseAppOrder(it[Keys.APP_ORDER])
     }
 
+    /** Apps hidden from every Collections panel (kept in A–Z, dock, etc.). */
+    val hiddenFromCollections: Flow<Set<String>> = store.data.map {
+        it[Keys.HIDDEN_APPS]?.split('\n')?.filter(String::isNotBlank)
+            ?.toSet() ?: emptySet()
+    }
+
+    /**
+     * Remove from Collections: add to the hidden set and drop any pinned
+     * positions, keeping the category override so un-hiding returns the app
+     * to the same category.
+     */
+    suspend fun hideFromCollections(componentKey: String) {
+        store.edit { p ->
+            val hidden = p[Keys.HIDDEN_APPS]?.split('\n')
+                ?.filter(String::isNotBlank).orEmpty()
+            p[Keys.HIDDEN_APPS] = (hidden + componentKey).joinToString("\n")
+            p[Keys.APP_ORDER] = serializeAppOrder(
+                parseAppOrder(p[Keys.APP_ORDER]).mapValues { (_, list) ->
+                    list.filter { it != componentKey }
+                },
+            )
+        }
+    }
+
+    /** Un-hide apps so they show in their (overridden) categories again. */
+    suspend fun showInCollections(keys: Collection<String>) {
+        store.edit { p ->
+            val hidden = p[Keys.HIDDEN_APPS]?.split('\n')
+                ?.filter(String::isNotBlank).orEmpty()
+            p[Keys.HIDDEN_APPS] =
+                hidden.filter { it !in keys }.joinToString("\n")
+        }
+    }
+
     /**
      * One-edit drop commit: points [componentKey]'s override at [targetKey]
      * (or clears it when dropping back onto the automatic [autoKey]) and
@@ -327,6 +362,13 @@ class SettingsRepository(private val context: Context) {
             val orders = parseAppOrder(p[Keys.APP_ORDER]).toMutableMap()
             orders[targetKey] = targetOrder
             p[Keys.APP_ORDER] = serializeAppOrder(orders)
+            // Dragging a hidden app into a category un-hides it.
+            val hidden = p[Keys.HIDDEN_APPS]?.split('\n')
+                ?.filter(String::isNotBlank).orEmpty()
+            if (componentKey in hidden) {
+                p[Keys.HIDDEN_APPS] = hidden
+                    .filter { it != componentKey }.joinToString("\n")
+            }
         }
     }
 
