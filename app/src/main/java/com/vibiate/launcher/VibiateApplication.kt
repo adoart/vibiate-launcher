@@ -5,6 +5,7 @@ import com.vibiate.launcher.data.AppRepository
 import com.vibiate.launcher.data.DockRepository
 import com.vibiate.launcher.data.IconPackManager
 import com.vibiate.launcher.data.SettingsRepository
+import com.vibiate.launcher.data.SpaceEngine
 import com.vibiate.launcher.data.WallpaperRotator
 import com.vibiate.launcher.widget.WidgetController
 
@@ -15,6 +16,7 @@ class VibiateApplication : Application() {
     val dockRepository by lazy { DockRepository(this, settingsRepository) }
     val iconPackManager by lazy { IconPackManager(this) }
     val widgetController by lazy { WidgetController(this, settingsRepository) }
+    val spaceEngine by lazy { SpaceEngine(this, settingsRepository) }
     val wallpaperRotator by lazy { WallpaperRotator(this, settingsRepository) }
 
     override fun onCreate() {

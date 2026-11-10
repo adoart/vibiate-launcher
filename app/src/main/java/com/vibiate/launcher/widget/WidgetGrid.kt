@@ -189,3 +189,53 @@ fun placeWithPushDown(
         }
     return placed.mapValues { it.value.first }
 }
+
+/** Grid cell geometry shared by the renderer and content seeding. */
+const val WIDGET_CELL_HEIGHT_DP = 96f
+const val WIDGET_GRID_GAP_DP = 8f
+const val WIDGET_GRID_PADDING_DP = 12f
+
+/** Grid cell width in dp for a content area [screenWidthDp] wide. */
+fun gridCellWidthDp(screenWidthDp: Float): Float =
+    (screenWidthDp - 2 * WIDGET_GRID_PADDING_DP -
+        WIDGET_GRID_GAP_DP * (WIDGET_COLUMNS - 1)) / WIDGET_COLUMNS
+
+/**
+ * Stored span if set, else the provider's preferred span on the grid —
+ * the same rule the grid renderer uses.
+ */
+fun effectiveSpan(
+    entry: com.vibiate.launcher.data.WidgetEntry,
+    info: android.appwidget.AppWidgetProviderInfo?,
+    density: Float,
+    cellWidthDp: Float,
+): GridSpan {
+    if (entry.cols > 0 && entry.rows > 0) {
+        return GridSpan(
+            entry.cols.coerceIn(1, WIDGET_COLUMNS),
+            entry.rows.coerceIn(1, WIDGET_MAX_ROWS),
+        )
+    }
+    val targetCols = if (android.os.Build.VERSION.SDK_INT >=
+        android.os.Build.VERSION_CODES.S
+    ) {
+        info?.targetCellWidth ?: 0
+    } else {
+        0
+    }
+    val targetRows = if (android.os.Build.VERSION.SDK_INT >=
+        android.os.Build.VERSION_CODES.S
+    ) {
+        info?.targetCellHeight ?: 0
+    } else {
+        0
+    }
+    return autoSpan(
+        minWidthDp = (info?.minWidth ?: 0) / density,
+        minHeightDp = (info?.minHeight ?: 0) / density,
+        targetCols = targetCols,
+        targetRows = targetRows,
+        cellWidthDp = cellWidthDp,
+        cellHeightDp = WIDGET_CELL_HEIGHT_DP,
+    )
+}

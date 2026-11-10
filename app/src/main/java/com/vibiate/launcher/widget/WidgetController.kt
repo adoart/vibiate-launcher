@@ -130,6 +130,18 @@ class WidgetController(
     /** Delete a custom screen: release its widget ids and drop it from settings. */
     fun removeScreen(screenId: Int) {
         if (screenId <= 0) return // screen 0 is the built-in Widgets page
+        removeScreenContent(screenId)
+        scope.launch {
+            val screens = settings.customScreens.first()
+            settings.setCustomScreens(screens.filterNot { it.id == screenId })
+        }
+    }
+
+    /**
+     * Drop everything on [screenId]: release its widget host ids and remove
+     * its page shortcuts. Works for any screen id, including space pages.
+     */
+    fun removeScreenContent(screenId: Int) {
         _widgets.value
             .filter { it.screenId == screenId }
             .forEach { discardId(it.appWidgetId) }
@@ -137,10 +149,51 @@ class WidgetController(
         _shortcuts.value = _shortcuts.value.filterNot { it.screenId == screenId }
         persist()
         persistShortcuts()
-        scope.launch {
-            val screens = settings.customScreens.first()
-            settings.setCustomScreens(screens.filterNot { it.id == screenId })
+    }
+
+    /**
+     * Make the page shortcuts on [screenId] exactly [keys]: unticked ones
+     * are removed, missing ones are added at the first free 1x1 cell given
+     * the screen's placed widgets (same span rule as the grid renderer).
+     */
+    fun setScreenApps(screenId: Int, keys: List<String>) {
+        val keep = keys.toSet()
+        _shortcuts.value = _shortcuts.value.filterNot {
+            it.screenId == screenId && it.componentKey !in keep
         }
+        val missing = keys.filter { key ->
+            _shortcuts.value.none {
+                it.screenId == screenId && it.componentKey == key
+            }
+        }
+        if (missing.isEmpty()) {
+            persistShortcuts()
+            return
+        }
+        val density = context.resources.displayMetrics.density
+        val screenW = context.resources.displayMetrics.widthPixels / density
+        val cellW = gridCellWidthDp(screenW)
+        val cell = GridSpan(1, 1)
+        val placed = mutableListOf<Pair<GridPos, GridSpan>>()
+        _widgets.value.filter { it.screenId == screenId }.forEach { e ->
+            if (e.col >= 0 && e.row >= 0) {
+                placed += GridPos(e.col, e.row) to
+                    effectiveSpan(e, providerInfo(e.appWidgetId), density, cellW)
+            }
+        }
+        _shortcuts.value.filter { it.screenId == screenId }.forEach { s ->
+            if (s.col >= 0 && s.row >= 0) {
+                placed += GridPos(s.col, s.row) to cell
+            }
+        }
+        var nextId = (_shortcuts.value.maxOfOrNull { it.id } ?: 0) + 1
+        val additions = missing.map { key ->
+            val pos = firstFreeSpot(placed, cell)
+            placed += pos to cell
+            PageShortcut(nextId++, key, screenId, pos.col, pos.row)
+        }
+        _shortcuts.value = _shortcuts.value + additions
+        persistShortcuts()
     }
 
     fun createView(entry: WidgetEntry): AppWidgetHostView? {

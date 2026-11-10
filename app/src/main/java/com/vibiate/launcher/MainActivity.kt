@@ -57,6 +57,35 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Seed each default space's app icons once (spaces' grids only get
+        // shortcuts, never widgets, from this path).
+        lifecycleScope.launch {
+            app.widgetController.restoredFlow.first { it }
+            app.appRepository.loaded.first { it }
+            if (app.settingsRepository.spacesContentSeeded.first()) {
+                return@launch
+            }
+            val spaceIds = app.settingsRepository.spaces.first()
+                .map { it.id }.toSet()
+            val widgets = app.widgetController.widgets.value
+            val shortcuts = app.widgetController.shortcuts.value
+            val apps = app.appRepository.apps.value
+            for (id in listOf(1, 2, 3, 4)) {
+                if (id !in spaceIds) continue
+                val screenId = com.vibiate.launcher.data.spaceScreenId(id)
+                if (widgets.any { it.screenId == screenId } ||
+                    shortcuts.any { it.screenId == screenId }
+                ) {
+                    continue
+                }
+                app.widgetController.setScreenApps(
+                    screenId,
+                    com.vibiate.launcher.data.defaultSpaceApps(id, apps),
+                )
+            }
+            app.settingsRepository.setSpacesContentSeeded(true)
+        }
+
         // The theme's android:windowShowWallpaper is not always honored; the
         // runtime flag is the reliable equivalent.
         window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
@@ -78,6 +107,7 @@ class MainActivity : ComponentActivity() {
                 settings = app.settingsRepository,
                 iconPackManager = app.iconPackManager,
                 widgetController = app.widgetController,
+                spaceEngine = app.spaceEngine,
                 wallpaperRotator = app.wallpaperRotator,
                 dockRepository = app.dockRepository,
                 homeEvents = homeEvents,

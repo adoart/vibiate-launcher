@@ -1,6 +1,7 @@
 package com.vibiate.launcher.data
 
 import android.content.Context
+import com.vibiate.launcher.R
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -37,6 +38,14 @@ class SettingsRepository(private val context: Context) {
         val CATEGORY_ORDER = stringPreferencesKey("category_order") // newline-joined category keys
         val APP_ORDER = stringPreferencesKey("app_order") // newline-joined "categoryKey=ck1|ck2|..."
         val HIDDEN_APPS = stringPreferencesKey("collections_hidden") // newline-joined componentKeys
+        val SPACES = stringPreferencesKey("spaces") // newline-joined SpaceDef.serialize(); absent = defaults
+        val SPACES_AUTO = booleanPreferencesKey("spaces_auto") // auto-switch on/off
+        val SPACE_FALLBACK = intPreferencesKey("space_fallback") // space id when nothing matches
+        val SPACE_MANUAL = stringPreferencesKey("space_manual") // "spaceId;autoIdOrEmpty"
+        val PLACE_HOME = stringPreferencesKey("place_home") // SavedPlace.serialize()
+        val PLACE_WORK = stringPreferencesKey("place_work") // SavedPlace.serialize()
+        val CAR_BT_DEVICES = stringPreferencesKey("car_bt_devices") // newline "address|name"
+        val SPACES_CONTENT_SEEDED = booleanPreferencesKey("spaces_content_seeded")
     }
 
     private val store get() = context.vibiateDataStore
@@ -341,6 +350,104 @@ class SettingsRepository(private val context: Context) {
             p[Keys.HIDDEN_APPS] =
                 hidden.filter { it !in keys }.joinToString("\n")
         }
+    }
+
+    // ---- Aviate Spaces ----
+
+    private fun defaultSpaceDefs(): List<SpaceDef> = defaultSpaces { id ->
+        when (id) {
+            1 -> context.getString(R.string.space_morning)
+            2 -> context.getString(R.string.space_work)
+            3 -> context.getString(R.string.space_going_somewhere)
+            4 -> context.getString(R.string.space_listening)
+            else -> context.getString(R.string.space_name, id)
+        }
+    }
+
+    /** Spaces in priority order; absent key = built-in defaults. Never empty. */
+    val spaces: Flow<List<SpaceDef>> = store.data.map { prefs ->
+        prefs[Keys.SPACES]?.split('\n')
+            ?.mapNotNull(SpaceDef::deserialize)
+            ?.takeIf { it.isNotEmpty() }
+            ?: defaultSpaceDefs()
+    }
+
+    suspend fun setSpaces(list: List<SpaceDef>) {
+        store.edit {
+            it[Keys.SPACES] = list.joinToString("\n") { s -> s.serialize() }
+        }
+    }
+
+    val spacesAuto: Flow<Boolean> = store.data.map { it[Keys.SPACES_AUTO] ?: true }
+
+    suspend fun setSpacesAuto(enabled: Boolean) {
+        store.edit { it[Keys.SPACES_AUTO] = enabled }
+    }
+
+    val spaceFallback: Flow<Int> = store.data.map {
+        it[Keys.SPACE_FALLBACK] ?: DEFAULT_SPACE_FALLBACK
+    }
+
+    suspend fun setSpaceFallback(id: Int) {
+        store.edit { it[Keys.SPACE_FALLBACK] = id }
+    }
+
+    /** The active manual chip pick; absent = automatic. */
+    val spaceManual: Flow<ManualPick?> = store.data.map {
+        it[Keys.SPACE_MANUAL]?.let(ManualPick::deserialize)
+    }
+
+    suspend fun setSpaceManual(pick: ManualPick?) {
+        store.edit {
+            if (pick == null) it.remove(Keys.SPACE_MANUAL)
+            else it[Keys.SPACE_MANUAL] = pick.serialize()
+        }
+    }
+
+    val placeHome: Flow<SavedPlace?> = store.data.map {
+        it[Keys.PLACE_HOME]?.let(SavedPlace::deserialize)
+    }
+
+    suspend fun setPlaceHome(place: SavedPlace?) {
+        store.edit {
+            if (place == null) it.remove(Keys.PLACE_HOME)
+            else it[Keys.PLACE_HOME] = place.serialize()
+        }
+    }
+
+    val placeWork: Flow<SavedPlace?> = store.data.map {
+        it[Keys.PLACE_WORK]?.let(SavedPlace::deserialize)
+    }
+
+    suspend fun setPlaceWork(place: SavedPlace?) {
+        store.edit {
+            if (place == null) it.remove(Keys.PLACE_WORK)
+            else it[Keys.PLACE_WORK] = place.serialize()
+        }
+    }
+
+    /** Chosen car Bluetooth devices as "address|name" lines. */
+    val carBtDevices: Flow<List<Pair<String, String>>> = store.data.map {
+        it[Keys.CAR_BT_DEVICES]?.split('\n')?.mapNotNull { line ->
+            val i = line.indexOf('|')
+            if (i <= 0) null else line.substring(0, i) to line.substring(i + 1)
+        } ?: emptyList()
+    }
+
+    suspend fun setCarBtDevices(devices: List<Pair<String, String>>) {
+        store.edit {
+            it[Keys.CAR_BT_DEVICES] = devices.joinToString("\n") { (a, n) ->
+                "$a|${n.replace('|', ' ').replace('\n', ' ')}"
+            }
+        }
+    }
+
+    val spacesContentSeeded: Flow<Boolean> = store.data.map {
+        it[Keys.SPACES_CONTENT_SEEDED] ?: false
+    }
+
+    suspend fun setSpacesContentSeeded(seeded: Boolean) {
+        store.edit { it[Keys.SPACES_CONTENT_SEEDED] = seeded }
     }
 
     /**

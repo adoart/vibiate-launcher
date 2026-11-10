@@ -45,6 +45,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -77,6 +78,9 @@ import com.vibiate.launcher.data.IconPackManager
 import com.vibiate.launcher.data.IconTheme
 import com.vibiate.launcher.data.LauncherFont
 import com.vibiate.launcher.data.SettingsRepository
+import com.vibiate.launcher.data.SpaceEngine
+import com.vibiate.launcher.data.SpaceReason
+import com.vibiate.launcher.data.spaceScreenId
 import com.vibiate.launcher.data.ThemeMode
 import com.vibiate.launcher.data.WallpaperRotator
 import com.vibiate.launcher.ui.components.LauncherDock
@@ -92,7 +96,11 @@ import com.vibiate.launcher.ui.theme.AviateOrange
 import com.vibiate.launcher.ui.theme.LocalAviateColors
 import com.vibiate.launcher.ui.theme.VibiateTheme
 import com.vibiate.launcher.widget.WidgetController
+import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
@@ -105,6 +113,7 @@ fun LauncherRoot(
     settings: SettingsRepository,
     iconPackManager: IconPackManager,
     widgetController: WidgetController,
+    spaceEngine: SpaceEngine,
     wallpaperRotator: WallpaperRotator,
     dockRepository: DockRepository,
     /** Emits when HOME is pressed while the launcher is in front. */
@@ -162,13 +171,20 @@ fun LauncherRoot(
     // Pages: built-in tabs (ordinal order: HOME, WIDGETS, COLLECTIONS, ALL_APPS),
     // then custom widget spaces, then a trailing "Add space" page.
     val customScreens by settings.customScreens.collectAsState(initial = emptyList())
+    val spaces by settings.spaces.collectAsState(initial = emptyList())
+    val spaceResolution by spaceEngine.resolution.collectAsState()
     val builtInCount = LauncherTab.entries.size
-    val pagerState = rememberPagerState(initialPage = 0) {
+    val pagerState = rememberPagerState(
+        initialPage = LauncherTab.HOME.ordinal,
+    ) {
         builtInCount + customScreens.size + 1
     }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showCustomize by rememberSaveable { mutableStateOf(false) }
     var widgetPickerTarget by remember { mutableStateOf<Int?>(null) }
+    // Set by the Spaces header's Tune button / settings' "Add widget":
+    // opens Settings inside that space's editor, or stages a space widget add.
+    var settingsSpaceId by remember { mutableStateOf<Int?>(null) }
     // Each composed page reports editing independently — adjacent pages
     // would otherwise overwrite each other's onEditingChange(false).
     val widgetEditingByPage = remember { mutableStateMapOf<Int, Boolean>() }
@@ -194,8 +210,14 @@ fun LauncherRoot(
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START -> widgetController.startListening()
-                Lifecycle.Event.ON_STOP -> widgetController.stopListening()
+                Lifecycle.Event.ON_START -> {
+                    widgetController.startListening()
+                    spaceEngine.start()
+                }
+                Lifecycle.Event.ON_STOP -> {
+                    widgetController.stopListening()
+                    spaceEngine.stop()
+                }
                 else -> Unit
             }
         }
@@ -203,11 +225,48 @@ fun LauncherRoot(
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             widgetController.stopListening()
+            spaceEngine.stop()
         }
     }
 
     fun launch(app: AppEntry) {
         context.startActivity(appRepository.launchIntent(app))
+    }
+
+    // Space activations: show the page and/or launch the configured app,
+    // unless the user is in settings/customize, mid-drag, or editing.
+    val editingNow by rememberUpdatedState(widgetEditing)
+    val settingsOpen by rememberUpdatedState(showSettings)
+    val customizeOpen by rememberUpdatedState(showCustomize)
+    // Held in the engine until consumed, so an activation that lands during
+    // a config-change recreate (car mode) is handled by the new composition.
+    val pendingActivation by spaceEngine.pendingActivation.collectAsState()
+    LaunchedEffect(pendingActivation) {
+        val def = pendingActivation ?: return@LaunchedEffect
+        if (def.showOnActivate &&
+            !settingsOpen && !customizeOpen &&
+            !drag.isDragging && !editingNow
+        ) {
+            val target = LauncherTab.SPACES.ordinal
+            snapshotFlow { pagerState.layoutInfo.viewportSize.width }
+                .first { it > 0 }
+            // A competing scroll can cut the animation short; snap so the
+            // pager never rests between pages.
+            try {
+                pagerState.animateScrollToPage(target)
+            } catch (e: CancellationException) {
+                coroutineContext.ensureActive()
+            }
+            if (pagerState.currentPage != target ||
+                pagerState.currentPageOffsetFraction != 0f
+            ) {
+                pagerState.scrollToPage(target)
+            }
+        }
+        spaceEngine.consumeActivation(def)
+        def.launchOnActivate
+            ?.let { key -> pageApps.firstOrNull { it.componentKey == key } }
+            ?.let { runCatching { launch(it) } }
     }
 
     // Emitted once per Collections-search-bar tap, after the pager settles on
@@ -362,7 +421,13 @@ fun LauncherRoot(
                         showSettings = false
                         scope.launch { pagerState.animateScrollToPage(tab.ordinal) }
                     },
-                    onSettingsClick = { showSettings = true },
+                    onSettingsClick = {
+                        settingsSpaceId = null
+                        showSettings = true
+                    },
+                    spaceGlyph = spaces.firstOrNull {
+                        it.id == spaceResolution?.spaceId
+                    }?.glyph?.icon,
                 )
                 // While a widget is edited, taps/long-presses on the top
                 // bar only request an edit-mode exit.
@@ -406,9 +471,25 @@ fun LauncherRoot(
                                 iconPackManager = iconPackManager,
                                 appRepository = appRepository,
                                 dockRepository = dockRepository,
+                                spaceEngine = spaceEngine,
+                                widgetController = widgetController,
                                 wallpaperRotator = wallpaperRotator,
-                                onBack = { showSettings = false },
+                                initialSpaceId = settingsSpaceId,
+                                onBack = {
+                                    settingsSpaceId = null
+                                    showSettings = false
+                                },
                                 onRestoreHomeWidgets = onRestoreHomeWidgets,
+                                onAddWidgetToSpace = { spaceId ->
+                                    showSettings = false
+                                    scope.launch {
+                                        spaceEngine.selectManual(spaceId)
+                                        pagerState.animateScrollToPage(
+                                            LauncherTab.SPACES.ordinal,
+                                        )
+                                    }
+                                    widgetPickerTarget = spaceScreenId(spaceId)
+                                },
                             )
                         }
                     } else {
@@ -425,6 +506,35 @@ fun LauncherRoot(
                         ) { page ->
                             when {
                                 page < builtInCount -> when (LauncherTab.entries[page]) {
+                                    LauncherTab.SPACES -> SpacesScreen(
+                                        controller = widgetController,
+                                        spaces = spaces,
+                                        resolution = spaceResolution,
+                                        onSelectSpace = { id ->
+                                            scope.launch {
+                                                spaceEngine.selectManual(id)
+                                            }
+                                        },
+                                        onOpenSettings = { spaceId ->
+                                            settingsSpaceId = spaceId
+                                            showSettings = true
+                                        },
+                                        apps = pageApps,
+                                        iconTheme = iconTheme,
+                                        onLaunch = ::launch,
+                                        isCurrentPage =
+                                            pagerState.currentPage == page,
+                                        onDockRemove = { key ->
+                                            dockRepository.edit {
+                                                dockRemove(it, key)
+                                            }
+                                        },
+                                        editBlur = editBlur,
+                                        onEditingChange = {
+                                            widgetEditingByPage[page] = it
+                                        },
+                                        exitEditRequest = exitEditRequest,
+                                    )
                                     LauncherTab.HOME -> HomeScreen(
                                         settings = settings,
                                         controller = widgetController,
@@ -617,18 +727,22 @@ fun LauncherRoot(
                 },
                 onAddWidget = {
                     showCustomize = false
-                    // Target: Home -> HOME_SCREEN_ID; the Widgets page -> 0;
-                    // a custom space -> its id; anywhere else -> Widgets page
-                    // after paging to it.
+                    // Target: Home -> HOME_SCREEN_ID; Spaces -> the active
+                    // space's screen; the Widgets page -> 0; a custom space ->
+                    // its id; anywhere else -> Widgets page after paging to it.
                     val page = pagerState.currentPage
+                    val spacesTarget = spaceResolution?.spaceId
+                        ?.let(::spaceScreenId) ?: 0
                     widgetPickerTarget = when {
+                        page == LauncherTab.SPACES.ordinal -> spacesTarget
                         page == LauncherTab.HOME.ordinal -> HOME_SCREEN_ID
                         page == LauncherTab.WIDGETS.ordinal -> 0
                         page in builtInCount until builtInCount + customScreens.size ->
                             customScreens[page - builtInCount].id
                         else -> 0
                     }
-                    if (page != LauncherTab.HOME.ordinal &&
+                    if (page != LauncherTab.SPACES.ordinal &&
+                        page != LauncherTab.HOME.ordinal &&
                         page != LauncherTab.WIDGETS.ordinal &&
                         page !in builtInCount until builtInCount + customScreens.size
                     ) {

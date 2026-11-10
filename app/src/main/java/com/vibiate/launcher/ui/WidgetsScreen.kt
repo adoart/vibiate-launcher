@@ -109,6 +109,7 @@ import com.vibiate.launcher.widget.WidgetController
 import com.vibiate.launcher.widget.autoSpan
 import com.vibiate.launcher.widget.clampSpan
 import com.vibiate.launcher.widget.dropPlacement
+import com.vibiate.launcher.widget.effectiveSpan
 import com.vibiate.launcher.widget.firstFreeSpot
 import com.vibiate.launcher.widget.flowLayout
 import com.vibiate.launcher.widget.placeWithPushDown
@@ -335,7 +336,7 @@ fun WidgetsScreen(
                 val infos = orderedWidgets.associate {
                     it.appWidgetId to controller.providerInfo(it.appWidgetId)
                 }
-                val spans = orderedWidgets.map { e -> effectiveSpan(e, infos[e.appWidgetId], density.density, cellW) }
+                val spans = orderedWidgets.map { e -> effectiveSpan(e, infos[e.appWidgetId], density.density, cellW.value) }
                 val layoutSpans = orderedWidgets.mapIndexed { i, e ->
                     if (e.appWidgetId == effectiveEditId) previewSpan ?: spans[i]
                     else spans[i]
@@ -362,7 +363,8 @@ fun WidgetsScreen(
                     }
                     val spanOf = orderedWidgets.associate {
                         it.appWidgetId to effectiveSpan(
-                            it, infos[it.appWidgetId], density.density, cellW,
+                            it, infos[it.appWidgetId], density.density,
+                            cellW.value,
                         )
                     }
                     val positions: Map<Int, GridPos> =
@@ -937,35 +939,6 @@ fun WidgetsScreen(
 private fun WidgetEntry.labelPlaceholder(): String = providerClass
     .substringAfterLast('.')
 
-/** Stored span if set, else the provider's preferred span on the grid. */
-private fun effectiveSpan(
-    entry: WidgetEntry,
-    info: AppWidgetProviderInfo?,
-    density: Float,
-    cellW: Dp,
-): GridSpan {
-    if (entry.cols > 0 && entry.rows > 0) {
-        return GridSpan(
-            entry.cols.coerceIn(1, WIDGET_COLUMNS),
-            entry.rows.coerceIn(1, 8),
-        )
-    }
-    val targetCols = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        info?.targetCellWidth ?: 0
-    } else 0
-    val targetRows = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        info?.targetCellHeight ?: 0
-    } else 0
-    return autoSpan(
-        minWidthDp = (info?.minWidth ?: 0) / density,
-        minHeightDp = (info?.minHeight ?: 0) / density,
-        targetCols = targetCols,
-        targetRows = targetRows,
-        cellWidthDp = cellW.value,
-        cellHeightDp = cellHeight.value,
-    )
-}
-
 /**
  * One grid cell: the widget host view (with its title label), a blue frame +
  * drag handles while resizing, and the long-press context menu.
@@ -1004,7 +977,7 @@ private fun WidgetCell(
     val verticalResizable = info == null ||
         info.resizeMode and AppWidgetProviderInfo.RESIZE_VERTICAL != 0
     // Stored span is the drag base; fall back to the provider's default.
-    val baseSpan = effectiveSpan(entry, info, density.density, cellW)
+    val baseSpan = effectiveSpan(entry, info, density.density, cellW.value)
     val minCols = info?.let { pxToCells(it.minResizeWidth, density.density, cellW.value) }
         ?.coerceAtLeast(1) ?: 1
     val minRows = info?.let { pxToCells(it.minResizeHeight, density.density, cellHeight.value) }

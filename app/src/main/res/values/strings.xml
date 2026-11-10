@@ -1,101 +1,309 @@
 <?xml version="1.0" encoding="utf-8"?>
+
 <resources>
+
     <string name="app_name">Vibiate</string>
 
+
+
     <!-- Top bar navigation -->
+
     <string name="nav_home">Home</string>
+
     <string name="nav_collections">Collections</string>
+
     <string name="nav_all_apps">A–Z apps</string>
+
     <string name="nav_widgets">Widgets</string>
+
     <string name="nav_settings">Settings</string>
 
+
+
     <!-- Home screen -->
+
     <string name="swipe_hint">Swipe for collections</string>
+
+
 
     <!-- Weather conditions (WMO codes) -->
 
+
+
     <!-- Widget spaces -->
+
     <string name="add_widget">Add widget</string>
+
     <string name="no_widgets">No widgets yet</string>
+
     <string name="remove_from_collections">Remove from Collections</string>
+
     <string name="show_in_collections">Show in Collections</string>
+
     <string name="search_hint">Search</string>
+
     <string name="no_widgets_found">No widgets found</string>
+
     <plurals name="widget_count">
+
         <item quantity="one">%d widget</item>
+
         <item quantity="other">%d widgets</item>
+
     </plurals>
+
     <string name="widget_add_hint">Long-press the wallpaper to add one</string>
+
     <string name="remove_widget">Remove widget</string>
+
     <string name="widget_rename">Rename</string>
+
     <string name="widget_rename_title">Rename widget</string>
+
     <string name="add_space">Add space</string>
+
     <string name="space_name">Space %1$d</string>
+
     <string name="remove_space">Remove space</string>
+
     <string name="remove_space_title">Remove %1$s?</string>
+
     <string name="remove_space_message">Widgets on this space will be removed too.</string>
+
     <string name="remove">Remove</string>
+
     <string name="cancel">Cancel</string>
 
+
+
     <!-- Dock -->
+
     <string name="dock_remove">Remove from dock</string>
+
     <string name="dock_app_info">App info</string>
+
     <string name="dock_expand">Expand dock</string>
+
     <string name="dock_collapse">Collapse dock</string>
+
     <string name="dock_reset">Reset dock</string>
+
     <string name="dock_reset_subtitle">Restore the default dock apps</string>
 
+
+
     <!-- Customize sheet (long-press empty space) -->
+
     <string name="customize_title">Customize</string>
+
     <string name="customize_wallpaper">Wallpaper</string>
+
     <string name="wallpaper_single">Single wallpaper</string>
+
     <string name="wallpaper_rotating">Rotating wallpapers</string>
+
     <string name="customize_grid">Grid layout</string>
+
     <string name="grid_columns">%1$d columns</string>
+
     <string name="customize_icon_pack">Icon pack</string>
+
     <string name="icon_pack_default">System default</string>
+
     <string name="icon_pack_default_subtitle">Each app\'s own icon</string>
+
     <string name="back">Back</string>
+
     <string name="iconpacks_title">ICON PACKS</string>
+
     <string name="iconpacks_primary_section">Icon pack</string>
+
     <string name="iconpacks_fallbacks_section">Fallback packs</string>
+
     <string name="iconpacks_fallbacks_hint">Used for apps the main pack doesn\'t cover</string>
+
     <string name="iconpacks_counts">%1$d icons · %2$d of your apps</string>
+
     <string name="iconpacks_loading">…</string>
+
     <string name="iconpacks_unthemed_section">Unthemed icons</string>
+
     <string name="iconpacks_mask">Apply pack\'s icon mask to unthemed apps</string>
+
     <string name="iconpacks_no_mask">This pack has no icon mask</string>
+
     <string name="change_icon">Change icon…</string>
+
     <string name="iconpicker_title">ICON</string>
+
     <string name="iconpicker_suggestions">Suggestions</string>
+
     <string name="iconpicker_original">Original</string>
+
     <string name="iconpicker_search">Search icons</string>
+
     <string name="iconpicker_reset">Reset to default</string>
+
     <string name="customize_font">Font</string>
+
     <string name="font_aviate">Aviate (Montserrat)</string>
+
     <string name="font_system">System default</string>
+
     <string name="font_sans_serif">Sans serif</string>
+
     <string name="font_serif">Serif</string>
+
     <string name="font_monospace">Monospace</string>
+
     <string name="customize_launcher_settings">Launcher settings</string>
+
     <string name="close">Close</string>
 
+
+
     <!-- Collections: custom categories -->
+
     <string name="new_category">New category</string>
+
     <string name="edit_category">Edit category</string>
+
     <string name="category_name">Name</string>
+
     <string name="create">Create</string>
+
     <string name="save">Save</string>
+
     <string name="edit">Edit</string>
+
     <string name="delete">Delete</string>
+
     <string name="done">Done</string>
+
     <string name="add_apps">Add apps…</string>
+
     <string name="add_apps_to">Add apps to %1$s</string>
+
     <string name="category_empty_hint">Long-press the title to add apps</string>
+
     <string name="delete_category_title">Delete %1$s?</string>
+
     <string name="delete_category_message">Apps return to their automatic categories.</string>
+
     <string name="move_to_category">Move to category…</string>
+
     <string name="app_info">App info</string>
+
     <string name="automatic">Automatic</string>
+
     <string name="search_apps">Search apps</string>
+
+
+
+    <!-- Aviate Spaces -->
+
+    <string name="nav_spaces">Spaces</string>
+
+    <string name="space_morning">Morning</string>
+
+    <string name="space_work">Work</string>
+
+    <string name="space_going_somewhere">Going Somewhere</string>
+
+    <string name="space_listening">Listening</string>
+
+    <string name="space_auto">Auto</string>
+
+    <string name="space_edit_hint">Space settings</string>
+
+    <string name="space_reason_manual">Chosen manually · tap Auto to switch automatically</string>
+
+    <string name="space_reason_fallback">Default space</string>
+
+    <string name="space_reason_headphones">Headphones connected</string>
+
+    <string name="space_reason_at_home">At Home</string>
+
+    <string name="space_reason_at_work">At Work</string>
+
+    <string name="space_reason_away">Away from Home and Work</string>
+
+    <string name="space_reason_driving">Driving</string>
+
+
+    <string name="spaces_switching">Switching</string>
+    <string name="spaces_auto_switch">Switch spaces automatically</string>
+    <string name="spaces_fallback_row">When nothing matches</string>
+    <string name="spaces_places">Places</string>
+    <string name="spaces_place_home">Home</string>
+    <string name="spaces_place_work">Work</string>
+    <string name="spaces_place_not_set">Not set</string>
+    <string name="spaces_place_format">%1$.4f, %2$.4f · %3$d m</string>
+    <string name="spaces_car">Car</string>
+    <string name="spaces_car_bt">Car Bluetooth devices</string>
+    <plurals name="spaces_car_selected">
+        <item quantity="one">%d selected</item>
+        <item quantity="other">%d selected</item>
+    </plurals>
+    <string name="spaces_car_perm">Permission needed</string>
+    <string name="spaces_car_hint">Android Auto / car mode also counts as driving.</string>
+    <string name="spaces_list_title">Spaces</string>
+    <string name="spaces_priority_hint">Higher spaces win when several match.</string>
+    <string name="spaces_general">General</string>
+    <string name="spaces_name">Name</string>
+    <string name="spaces_icon">Icon</string>
+    <string name="spaces_triggers">Triggers</string>
+    <string name="spaces_use_auto">Use for automatic switching</string>
+    <string name="spaces_match">Match</string>
+    <string name="spaces_match_any">Any trigger</string>
+    <string name="spaces_match_all">All triggers</string>
+    <string name="spaces_time">Time of day</string>
+    <string name="spaces_starts">Starts</string>
+    <string name="spaces_ends">Ends</string>
+    <string name="spaces_headphones">Headphones connected</string>
+    <string name="spaces_headphones_hint">Wired, USB or Bluetooth</string>
+    <string name="spaces_location">Location</string>
+    <string name="spaces_loc_none">None</string>
+    <string name="spaces_loc_home">At Home</string>
+    <string name="spaces_loc_work">At Work</string>
+    <string name="spaces_loc_away">Away from Home and Work</string>
+    <string name="spaces_set_home_hint">Set Home in Places</string>
+    <string name="spaces_set_work_hint">Set Work in Places</string>
+    <string name="spaces_driving">Driving</string>
+    <string name="spaces_driving_hint">Car Bluetooth device or car mode</string>
+    <string name="spaces_on_activate">When it activates</string>
+    <string name="spaces_show_page">Show the Spaces page</string>
+    <string name="spaces_open_app">Open an app</string>
+    <string name="spaces_none">None</string>
+    <string name="spaces_content">Content</string>
+    <string name="spaces_apps_row">Apps on this space</string>
+    <string name="spaces_apps_count">%d apps</string>
+    <string name="spaces_apps_dialog">Apps on %1$s</string>
+    <string name="spaces_delete">Delete space</string>
+    <string name="spaces_delete_title">Delete space?</string>
+    <string name="spaces_delete_msg">Its widgets and apps are removed from the grid.</string>
+    <string name="spaces_move_up">Move up</string>
+    <string name="spaces_move_down">Move down</string>
+    <string name="spaces_rename">Rename space</string>
+    <string name="spaces_use_current">Use current location</string>
+    <string name="spaces_latitude">Latitude</string>
+    <string name="spaces_longitude">Longitude</string>
+    <string name="spaces_radius">Radius</string>
+    <string name="spaces_no_bonded">No paired devices</string>
+    <string name="spaces_trig_at_home">At Home</string>
+    <string name="spaces_trig_at_work">At Work</string>
+    <string name="spaces_trig_away">Away</string>
+    <string name="spaces_trig_headphones">Headphones</string>
+    <string name="spaces_trig_driving">Driving</string>
+    <string name="spaces_trig_none">No triggers</string>
+    <string name="spaces_days_every">Every day</string>
+    <string name="spaces_days_week">Mon–Fri</string>
+    <string name="spaces_days_weekend">Sat–Sun</string>
+    <string name="spaces_value_auto">Automatic</string>
+    <string name="spaces_value_manual">Manual</string>
+    <string name="spaces_time_picker">Time</string>
+    <string name="spaces_close">Close</string>
+    <string name="spaces_day_letters">MTWTFSS</string>
+    <string name="spaces_clear">Clear</string>
 </resources>
+

@@ -43,7 +43,7 @@ import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.delay
 
 /** Ordinal == pager page index. Custom screens and the add-page follow these. */
-enum class LauncherTab { HOME, WIDGETS, COLLECTIONS, ALL_APPS }
+enum class LauncherTab { SPACES, HOME, WIDGETS, COLLECTIONS, ALL_APPS }
 
 private val timeFormat = DateTimeFormatter.ofPattern("HH:mm")
 
@@ -84,6 +84,8 @@ fun LauncherTopBar(
     activeTab: LauncherTab?,
     onTabSelected: (LauncherTab) -> Unit,
     onSettingsClick: () -> Unit,
+    /** Active space's glyph for the Spaces tab; time-of-day icon fallback. */
+    spaceGlyph: ImageVector? = null,
 ) {
     val accent = MaterialTheme.colorScheme.primary
     Row(
@@ -93,14 +95,14 @@ fun LauncherTopBar(
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector = contextIcon(LocalDateTime.now().hour),
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier
-                .padding(start = 8.dp)
-                .size(20.dp),
-        )
+        TabIcon(
+            spaceGlyph ?: contextIcon(LocalDateTime.now().hour),
+            stringResource(R.string.nav_spaces),
+            activeTab == LauncherTab.SPACES,
+            accent,
+        ) {
+            onTabSelected(LauncherTab.SPACES)
+        }
         Spacer(Modifier.weight(1f))
         Text(
             text = rememberClock(),

@@ -47,6 +47,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -90,12 +91,34 @@ fun SettingsScreen(
     iconPackManager: IconPackManager,
     appRepository: AppRepository,
     dockRepository: DockRepository,
+    spaceEngine: com.vibiate.launcher.data.SpaceEngine,
+    widgetController: com.vibiate.launcher.widget.WidgetController,
     wallpaperRotator: WallpaperRotator,
+    initialSpaceId: Int? = null,
     onBack: () -> Unit = {},
     onRestoreHomeWidgets: () -> Unit = {},
+    onAddWidgetToSpace: (Int) -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    // Spaces sub-page: swaps the whole settings content (back pops it).
+    var showSpaces by rememberSaveable {
+        mutableStateOf(initialSpaceId != null)
+    }
+    if (showSpaces) {
+        androidx.activity.compose.BackHandler { showSpaces = false }
+        SpacesSettingsScreen(
+            settings = settings,
+            engine = spaceEngine,
+            controller = widgetController,
+            appRepository = appRepository,
+            initialSpaceId = initialSpaceId,
+            onBack = { showSpaces = false },
+            onAddWidgetToSpace = onAddWidgetToSpace,
+        )
+        return
+    }
 
     val themeMode by settings.themeMode.collectAsState(initial = ThemeMode.DARK)
     val iconPackPkg by settings.iconPackPackage.collectAsState(initial = "")
@@ -223,6 +246,25 @@ fun SettingsScreen(
                     onClick = { wallpaperRotator.rotateNow() })
             }
 
+            item { SectionBand("Spaces") }
+            item {
+                val resolution by spaceEngine.resolution.collectAsState()
+                val spaces by settings.spaces.collectAsState(
+                    initial = emptyList(),
+                )
+                val auto by settings.spacesAuto.collectAsState(initial = true)
+                val active = spaces.firstOrNull {
+                    it.id == resolution?.spaceId
+                }?.name ?: ""
+                AviateRow(
+                    Icons.Filled.Widgets,
+                    "Spaces",
+                    value = (if (auto) "Automatic" else "Manual") +
+                        if (active.isNotBlank()) " · $active" else "",
+                    onClick = { showSpaces = true },
+                )
+            }
+
             item { SectionBand("Home") }
             item {
                 AviateRow(
@@ -344,6 +386,8 @@ internal fun AviateRow(
     title: String,
     value: String? = null,
     onClick: (() -> Unit)? = null,
+    /** Small grey line under the title (hints that would crowd [value]). */
+    subtitle: String? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
     Column(Modifier.fillMaxWidth().background(rowColor())) {
@@ -362,12 +406,12 @@ internal fun AviateRow(
                 modifier = Modifier.size(24.dp),
             )
             Spacer(Modifier.width(32.dp))
-            Text(
-                text = title,
-                fontSize = 16.sp,
-                color = rowTextColor(),
-                modifier = Modifier.weight(1f),
-            )
+            Column(Modifier.weight(1f)) {
+                Text(text = title, fontSize = 16.sp, color = rowTextColor())
+                if (subtitle != null) {
+                    Text(text = subtitle, fontSize = 12.sp, color = Color(0xFF999999))
+                }
+            }
             if (value != null) {
                 Text(text = value, fontSize = 13.sp, color = Color(0xFF999999))
             }
