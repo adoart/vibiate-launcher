@@ -10,3 +10,6 @@
 - Unit tests + debug APK land in `app/build/outputs/apk/debug/app-debug.apk`.
 - Install on the emulator with `adb install -r` (never uninstall/clear data —
   that wipes the launcher layout). ADB: `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe`.
+- APKs for the user's phone go in the repo's `build/` folder (git-ignored),
+  named `Vibiate-<versionName>-<short commit>.apk`, built from a clean,
+  committed tree — not on the Desktop.

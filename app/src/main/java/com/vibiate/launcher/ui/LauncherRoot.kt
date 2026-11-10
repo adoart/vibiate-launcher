@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -84,8 +85,8 @@ import com.vibiate.launcher.data.spaceScreenId
 import com.vibiate.launcher.data.ThemeMode
 import com.vibiate.launcher.data.WallpaperRotator
 import com.vibiate.launcher.ui.components.LauncherDock
+import com.vibiate.launcher.ui.components.LauncherPageIndicator
 import com.vibiate.launcher.ui.components.LauncherTab
-import com.vibiate.launcher.ui.components.LauncherTopBar
 import com.vibiate.launcher.ui.components.WidgetPickerSheet
 import com.vibiate.launcher.ui.components.toImageBitmap
 import com.vibiate.launcher.ui.drag.DragDropState
@@ -412,35 +413,11 @@ fun LauncherRoot(
             }
             Column(Modifier.fillMaxSize()) {
                 Box(Modifier.blur(16.dp * editBlur)) {
-                LauncherTopBar(
-                    // Custom/add pages and settings: underline nothing.
-                    activeTab = pagerState.currentPage
-                        .takeIf { it in LauncherTab.entries.indices && !showSettings }
-                        ?.let { LauncherTab.entries[it] },
-                    onTabSelected = { tab ->
-                        showSettings = false
-                        scope.launch { pagerState.animateScrollToPage(tab.ordinal) }
-                    },
-                    onSettingsClick = {
-                        settingsSpaceId = null
-                        showSettings = true
-                    },
-                    spaceGlyph = spaces.firstOrNull {
-                        it.id == spaceResolution?.spaceId
-                    }?.glyph?.icon,
-                )
-                // While a widget is edited, taps/long-presses on the top
-                // bar only request an edit-mode exit.
-                if (widgetEditing) {
-                    Box(
-                        Modifier
-                            .matchParentSize()
-                            .pointerInput(Unit) {
-                                detectTapGestures(
-                                    onTap = { exitEditRequest++ },
-                                    onLongPress = { exitEditRequest++ },
-                                )
-                            },
+                // Aviate page indicator (hidden while Settings is open).
+                if (!showSettings) {
+                    LauncherPageIndicator(
+                        pagerState = pagerState,
+                        pageCount = builtInCount + customScreens.size,
                     )
                 }
                 }
@@ -463,6 +440,7 @@ fun LauncherRoot(
                         Surface(
                             modifier = Modifier
                                 .fillMaxSize()
+                                .statusBarsPadding()
                                 .navigationBarsPadding(),
                             color = MaterialTheme.colorScheme.background,
                         ) {

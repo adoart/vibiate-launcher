@@ -1,30 +1,17 @@
 package com.vibiate.launcher.ui.components
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.NightsStay
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SortByAlpha
-import androidx.compose.material.icons.filled.WbSunny
-import androidx.compose.material.icons.filled.WbTwilight
-import androidx.compose.material.icons.filled.Widgets
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -33,144 +20,72 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.vibiate.launcher.R
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
+import com.vibiate.launcher.ui.theme.LocalAviateColors
 import kotlinx.coroutines.delay
 
 /** Ordinal == pager page index. Custom screens and the add-page follow these. */
 enum class LauncherTab { SPACES, HOME, WIDGETS, COLLECTIONS, ALL_APPS }
 
-private val timeFormat = DateTimeFormatter.ofPattern("HH:mm")
-
 /**
- * Current time that updates once per minute (just after each minute tick).
- * Reuse wherever minute-resolution time is needed, e.g. the home clock.
+ * Aviate's thin page indicator: a short flat line under the status bar in the
+ * current page's segment. Visible only while the pager is moving (swipe or
+ * programmatic scroll): fades in fast, holds ~600ms after settling, fades out.
+ * The 8dp slot is always reserved so content never jumps.
  */
 @Composable
-fun rememberNow(): LocalDateTime {
-    var now by remember { mutableStateOf(LocalDateTime.now()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            // Sleep until just after the next minute tick.
-            delay(60_000L - (System.currentTimeMillis() % 60_000L) + 250L)
-            now = LocalDateTime.now()
+fun LauncherPageIndicator(
+    pagerState: PagerState,
+    /** Real pages only — excludes the trailing "Add space" page. */
+    pageCount: Int,
+) {
+    var visible by remember { mutableStateOf(false) }
+    val scrolling = pagerState.isScrollInProgress
+    LaunchedEffect(scrolling) {
+        if (scrolling) {
+            visible = true
+        } else {
+            delay(600)
+            visible = false
         }
     }
-    return now
-}
-
-@Composable
-fun rememberClock(): String = rememberNow().format(timeFormat)
-
-/** Time-of-day glyph, like Aviate's contextual icon on the left of the top bar. */
-private fun contextIcon(hour: Int): ImageVector = when (hour) {
-    in 5..17 -> Icons.Filled.WbSunny
-    in 18..21 -> Icons.Filled.WbTwilight
-    else -> Icons.Filled.NightsStay
-}
-
-/**
- * Thin Aviate-style top bar: context icon left, clock center, space icons right
- * with the active one underlined. [activeTab] is null on custom/add pages, in
- * which case nothing is underlined.
- */
-@Composable
-fun LauncherTopBar(
-    activeTab: LauncherTab?,
-    onTabSelected: (LauncherTab) -> Unit,
-    onSettingsClick: () -> Unit,
-    /** Active space's glyph for the Spaces tab; time-of-day icon fallback. */
-    spaceGlyph: ImageVector? = null,
-) {
-    val accent = MaterialTheme.colorScheme.primary
-    Row(
-        modifier = Modifier
+    val alpha by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(if (visible) 150 else 300),
+        label = "pageIndicator",
+    )
+    val barColor = LocalAviateColors.current.homeText.copy(alpha = 0.9f)
+    Box(
+        Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .height(8.dp)
+            .graphicsLayer { this.alpha = alpha },
     ) {
-        TabIcon(
-            spaceGlyph ?: contextIcon(LocalDateTime.now().hour),
-            stringResource(R.string.nav_spaces),
-            activeTab == LauncherTab.SPACES,
-            accent,
-        ) {
-            onTabSelected(LauncherTab.SPACES)
-        }
-        Spacer(Modifier.weight(1f))
-        Text(
-            text = rememberClock(),
-            color = MaterialTheme.colorScheme.onSurface,
-            fontSize = 16.sp,
-            letterSpacing = 2.sp,
-        )
-        Spacer(Modifier.weight(1f))
-        Row(horizontalArrangement = Arrangement.End) {
-            TabIcon(
-                Icons.Filled.Home,
-                stringResource(R.string.nav_home),
-                activeTab == LauncherTab.HOME,
-                accent,
-            ) {
-                onTabSelected(LauncherTab.HOME)
-            }
-            TabIcon(
-                Icons.Filled.Widgets,
-                stringResource(R.string.nav_widgets),
-                activeTab == LauncherTab.WIDGETS,
-                accent,
-            ) {
-                onTabSelected(LauncherTab.WIDGETS)
-            }
-            TabIcon(
-                Icons.Filled.GridView,
-                stringResource(R.string.nav_collections),
-                activeTab == LauncherTab.COLLECTIONS,
-                accent,
-            ) {
-                onTabSelected(LauncherTab.COLLECTIONS)
-            }
-            TabIcon(
-                Icons.Filled.SortByAlpha,
-                stringResource(R.string.nav_all_apps),
-                activeTab == LauncherTab.ALL_APPS,
-                accent,
-            ) {
-                onTabSelected(LauncherTab.ALL_APPS)
-            }
-            TabIcon(Icons.Filled.Settings, stringResource(R.string.nav_settings), false, accent, onSettingsClick)
-        }
-    }
-}
-
-@Composable
-private fun TabIcon(
-    icon: ImageVector,
-    description: String,
-    active: Boolean,
-    accent: androidx.compose.ui.graphics.Color,
-    onClick: () -> Unit,
-) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) {
-            Icon(
-                imageVector = icon,
-                contentDescription = description,
-                tint = if (active) accent else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp),
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val widthPx = constraints.maxWidth.toFloat()
+            val segments = pageCount.coerceAtLeast(1)
+            val barPx = widthPx / segments
+            Box(
+                Modifier
+                    .width(with(
+                        androidx.compose.ui.platform.LocalDensity.current,
+                    ) { barPx.toDp() })
+                    .height(2.dp)
+                    .align(Alignment.CenterStart)
+                    // x read in the offset/layout phase so swipes don't
+                    // recompose the indicator every frame.
+                    .offset {
+                        val pos = (
+                            pagerState.currentPage +
+                                pagerState.currentPageOffsetFraction
+                            ).coerceIn(0f, (segments - 1).toFloat())
+                        IntOffset((pos * barPx).toInt(), 0)
+                    }
+                    .background(barColor),
             )
         }
-        Box(
-            Modifier
-                .width(24.dp)
-                .height(2.dp)
-                .background(if (active) accent else androidx.compose.ui.graphics.Color.Transparent)
-        )
     }
 }
