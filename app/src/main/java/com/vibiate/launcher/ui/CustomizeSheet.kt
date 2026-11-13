@@ -61,6 +61,7 @@ fun CustomizeSheet(
     appRepository: AppRepository,
     dockRepository: DockRepository,
     wallpaperRotator: WallpaperRotator,
+    onPickSingleWallpaper: () -> Unit = {},
     gridSize: Int,
     fontFamily: LauncherFont,
     onDismiss: () -> Unit,
@@ -73,12 +74,8 @@ fun CustomizeSheet(
     var showIconPackDialog by remember { mutableStateOf(false) }
     var showFontDialog by remember { mutableStateOf(false) }
 
-    // Single-image pick -> decode -> WallpaperManager.setBitmap (one-shot).
-    val pickWallpaper = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia()
-    ) { uri ->
-        if (uri != null) scope.launch { wallpaperRotator.setOnce(uri) }
-    }
+    // The PickVisualMedia launcher lives in LauncherRoot: it must outlive
+    // this sheet, which is dismissed before the picker returns.
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
@@ -123,11 +120,7 @@ fun CustomizeSheet(
                     DialogOption(stringResource(R.string.wallpaper_single)) {
                         showWallpaperDialog = false
                         onDismiss()
-                        pickWallpaper.launch(
-                            PickVisualMediaRequest(
-                                ActivityResultContracts.PickVisualMedia.ImageOnly
-                            )
-                        )
+                        onPickSingleWallpaper()
                     }
                     DialogOption(stringResource(R.string.wallpaper_rotating)) {
                         showWallpaperDialog = false

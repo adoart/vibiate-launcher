@@ -3,7 +3,9 @@ package com.vibiate.launcher.data
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.LauncherApps
 import android.content.pm.PackageManager
+import android.os.UserManager
 import android.content.pm.ResolveInfo
 import android.net.Uri
 import android.provider.MediaStore
@@ -164,6 +166,7 @@ class DockRepository(private val context: Context, private val settings: Setting
     fun currentKeys(): List<String?> {
         val pm = context.packageManager
         return _entries.value.map { e ->
+            if (e?.isWork == true) return@map e.key
             e?.component?.let { cn ->
                 dockKey(
                     runCatching {
@@ -200,7 +203,12 @@ class DockRepository(private val context: Context, private val settings: Setting
         val resolved = mutableSetOf<String>()
         return List(DOCK_MAX) { i ->
             val key = keys.getOrNull(i) ?: return@List null
-            val cn = runCatching { ComponentName.unflattenFromString(key) }.getOrNull()
+            val (base, serial) = splitProfileKey(key)
+            if (serial != null) {
+                return@List resolveWorkEntry(base, serial, key)
+                    ?.takeIf { resolved.add(key) }
+            }
+            val cn = runCatching { ComponentName.unflattenFromString(base) }.getOrNull()
                 ?: return@List null
             val ris = runCatching {
                 pm.queryIntentActivities(
@@ -231,6 +239,35 @@ class DockRepository(private val context: Context, private val settings: Setting
                 component = resolvedCn,
             )
         }
+    }
+
+    /**
+     * A docked app from another profile ("pkg/activity@serial"): resolved
+     * through LauncherApps; null (a hole) when that profile or app is gone.
+     */
+    private fun resolveWorkEntry(base: String, serial: Long, key: String): DockEntry? {
+        val cn = runCatching { ComponentName.unflattenFromString(base) }.getOrNull()
+            ?: return null
+        val userManager = context.getSystemService(UserManager::class.java)
+        val user = userManager.getUserForSerialNumber(serial) ?: return null
+        val activities = runCatching {
+            context.getSystemService(LauncherApps::class.java)
+                .getActivityList(cn.packageName, user)
+        }.getOrDefault(emptyList())
+        val lai = activities.firstOrNull { it.componentName.className == cn.className }
+            ?: activities.firstOrNull()
+            ?: return null
+        return DockEntry(
+            label = lai.label.toString(),
+            icon = lai.getIcon(0),
+            glyph = Icons.Filled.Folder,
+            intent = Intent(),
+            component = lai.componentName,
+            user = user,
+            key = profileKey(
+                lai.componentName.packageName, lai.componentName.className, serial,
+            ),
+        )
     }
 
     private fun placeholder(spec: SlotSpec) = DockEntry(

@@ -5,6 +5,7 @@ import androidx.annotation.StringRes
 import com.vibiate.launcher.R
 import android.content.Intent
 import android.graphics.drawable.Drawable
+import android.os.UserHandle
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.filled.Apps
@@ -41,9 +42,30 @@ data class AppEntry(
     val label: String,
     val icon: Drawable,
     val category: AppCategory,
+    /** Profile the app lives in; null = this launcher's own user. */
+    val user: UserHandle? = null,
+    /** UserManager serial of [user] (stable across reboots); 0 for own user. */
+    val userSerial: Long = 0L,
+    /** The app's work profile is paused (quiet mode). */
+    val paused: Boolean = false,
 ) {
     val component: ComponentName get() = ComponentName(packageName, activityName)
-    val componentKey: String get() = "$packageName/$activityName"
+    val isWork: Boolean get() = user != null
+
+    /** "pkg/activity", plus "@serial" for apps in another (work) profile. */
+    val componentKey: String get() = profileKey(packageName, activityName, user?.let { userSerial })
+}
+
+/** Persisted app key; [serial] null = own user (the pre-profile format). */
+fun profileKey(pkg: String, activity: String, serial: Long?): String =
+    if (serial == null) "$pkg/$activity" else "$pkg/$activity@$serial"
+
+/** Split a stored key into its "pkg/activity" part and optional profile serial. */
+fun splitProfileKey(key: String): Pair<String, Long?> {
+    val at = key.lastIndexOf('@')
+    if (at <= 0) return key to null
+    val serial = key.substring(at + 1).toLongOrNull() ?: return key to null
+    return key.substring(0, at) to serial
 }
 
 /** An app icon pinned to a widget page's grid at a fixed cell. */
@@ -93,7 +115,13 @@ data class DockEntry(
     val glyph: ImageVector,
     val intent: Intent,
     val component: ComponentName?,
-)
+    /** Profile of a work-profile entry; null = own user. */
+    val user: UserHandle? = null,
+    /** Persisted key (componentKey format, "@serial" for work entries). */
+    val key: String? = component?.let(::dockKey),
+) {
+    val isWork: Boolean get() = user != null
+}
 
 data class IconPackInfo(val packageName: String, val label: String)
 

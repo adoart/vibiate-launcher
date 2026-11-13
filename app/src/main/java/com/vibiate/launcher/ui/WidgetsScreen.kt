@@ -479,10 +479,9 @@ fun WidgetsScreen(
                             )
                         }
                         is DragPayload.Dock -> {
-                            val key = p.entry.component?.let { cn ->
-                                apps.firstOrNull {
-                                    it.componentKey == dockKey(cn)
-                                }?.componentKey
+                            val key = p.entry.key?.let { k ->
+                                apps.firstOrNull { it.componentKey == k }
+                                    ?.componentKey
                             } ?: return@derivedStateOf null
                             val same = screenShortcuts.firstOrNull {
                                 it.componentKey == key
@@ -534,9 +533,7 @@ fun WidgetsScreen(
                                         screenId, drop.componentKey,
                                         drop.positions, drop.movingShortcutId,
                                     )
-                                    p.entry.component?.let {
-                                        onDockRemove(dockKey(it))
-                                    }
+                                    p.entry.key?.let(onDockRemove)
                                     true
                                 }
                                 is DragPayload.Shortcut -> {

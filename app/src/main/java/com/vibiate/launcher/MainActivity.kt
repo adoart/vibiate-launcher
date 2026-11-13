@@ -38,6 +38,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Work profile added/removed/paused/resumed: reload apps and dock. */
+    private val profileReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            app.appRepository.invalidate()
+            app.dockRepository.invalidate()
+        }
+    }
+
     private val bindWidgetLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             onWidgetBindResult(result)
@@ -100,6 +108,29 @@ class MainActivity : ComponentActivity() {
             },
             Context.RECEIVER_EXPORTED,
         )
+        registerReceiver(
+            profileReceiver,
+            IntentFilter().apply {
+                addAction(Intent.ACTION_MANAGED_PROFILE_ADDED)
+                addAction(Intent.ACTION_MANAGED_PROFILE_REMOVED)
+                addAction(Intent.ACTION_MANAGED_PROFILE_AVAILABLE)
+                addAction(Intent.ACTION_MANAGED_PROFILE_UNAVAILABLE)
+                addAction(Intent.ACTION_MANAGED_PROFILE_UNLOCKED)
+            },
+            Context.RECEIVER_EXPORTED,
+        )
+
+        // Follow the auto-rotate setting: locked portrait unless the user
+        // enables landscape (then it follows the system auto-rotate toggle).
+        lifecycleScope.launch {
+            app.settingsRepository.allowRotation.collect { allow ->
+                requestedOrientation = if (allow) {
+                    android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+                } else {
+                    android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                }
+            }
+        }
 
         setContent {
             LauncherRoot(
@@ -130,6 +161,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         unregisterReceiver(packageReceiver)
+        unregisterReceiver(profileReceiver)
         super.onDestroy()
     }
 

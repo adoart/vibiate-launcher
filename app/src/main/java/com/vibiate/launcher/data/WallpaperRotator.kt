@@ -4,14 +4,19 @@ import android.app.WallpaperManager
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.widget.Toast
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.vibiate.launcher.R
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -23,6 +28,36 @@ class WallpaperRotator(
     private val settings: SettingsRepository,
 ) {
     private val workManager get() = WorkManager.getInstance(context)
+
+    // App-lifetime scope: a picked single wallpaper is applied even though
+    // the sheet that launched the picker is gone by then.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * Apply a just-picked single image, turn rotation off so the next
+     * rotation cannot replace it. Non-suspend; safe to call from the
+     * activity-result callback after the sheet is disposed.
+     */
+    fun applySingle(uri: Uri) {
+        scope.launch {
+            val ok = runCatching {
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    WallpaperManager.getInstance(context).setStream(stream)
+                    true
+                } ?: false
+            }.getOrDefault(false)
+            if (ok) {
+                settings.setWallpaperEnabled(false)
+                reschedule()
+            } else {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        context, R.string.wallpaper_failed, Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+        }
+    }
 
     /** Reschedule based on current settings. Call after enabling or changing interval/URIs. */
     suspend fun reschedule() {

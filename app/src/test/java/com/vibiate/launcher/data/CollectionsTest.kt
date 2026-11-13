@@ -2,6 +2,8 @@ package com.vibiate.launcher.data
 
 import android.graphics.drawable.ColorDrawable
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CollectionsTest {
@@ -152,5 +154,114 @@ class HiddenAppsTest {
         )
         val card = out.single { it.first.key == "PRODUCTIVITY" }
         assertEquals(listOf("b", "a"), card.second.map { it.activityName })
+    }
+}
+
+// ---- Part B: multi-card membership ----
+
+class MembershipTest {
+
+    private fun app(key: String, cat: AppCategory) = AppEntry(
+        "com.$key", "Main", key, android.graphics.drawable.ColorDrawable(), cat,
+    )
+
+    private val known = AppCategory.entries.mapTo(HashSet()) { it.name } +
+        setOf("custom:1")
+
+    private fun state(
+        overrides: Map<String, String> = emptyMap(),
+        extras: Map<String, List<String>> = emptyMap(),
+        hidden: Set<String> = emptySet(),
+        appOrder: Map<String, List<String>> = emptyMap(),
+    ) = CategoryState(overrides, extras, hidden, appOrder)
+
+    @Test
+    fun `extras render the app in both cards`() {
+        val apps = listOf(app("a", AppCategory.PRODUCTIVITY))
+        val cols = buildCollections(
+            apps, emptyList(), emptyMap(),
+            extras = mapOf("MUSIC" to listOf("com.a/Main")),
+        )
+        assertTrue(
+            cols.first { it.first.key == "PRODUCTIVITY" }.second.isNotEmpty(),
+        )
+        assertTrue(cols.any { it.first.key == "MUSIC" })
+    }
+
+    @Test
+    fun `add from A-Z into a second card keeps the first`() {
+        val s = addMembership(
+            state(), "com.a/Main", "PRODUCTIVITY", "MUSIC", known,
+        )
+        assertEquals(listOf("com.a/Main"), s.extras["MUSIC"])
+        assertTrue(s.overrides.isEmpty()) // primary unchanged
+    }
+
+    @Test
+    fun `card to card moves only that membership`() {
+        // Primary move.
+        var s = moveMembership(
+            state(), "com.a/Main", "PRODUCTIVITY", "PRODUCTIVITY", "MUSIC", known,
+        )
+        assertEquals("MUSIC", s.overrides["com.a/Main"])
+        // Extra move.
+        s = moveMembership(
+            state(extras = mapOf("MUSIC" to listOf("com.a/Main"))),
+            "com.a/Main", "PRODUCTIVITY", "MUSIC", "GAMES", known,
+        )
+        assertTrue(s.extras["MUSIC"].orEmpty().isEmpty())
+        assertEquals(listOf("com.a/Main"), s.extras["GAMES"])
+    }
+
+    @Test
+    fun `remove from primary keeps extras visible`() {
+        val s = removeMembership(
+            state(extras = mapOf("MUSIC" to listOf("com.a/Main"))),
+            "com.a/Main", "PRODUCTIVITY", "PRODUCTIVITY", known,
+        )
+        assertTrue("com.a/Main" in s.hidden)
+        assertEquals(listOf("com.a/Main"), s.extras["MUSIC"])
+    }
+
+    @Test
+    fun `remove last membership hides the app`() {
+        val s1 = removeMembership(
+            state(), "com.a/Main", "PRODUCTIVITY", "PRODUCTIVITY", known,
+        )
+        assertTrue("com.a/Main" in s1.hidden)
+        assertEquals(
+            emptyList<Pair<CollectionDef, List<AppEntry>>>(),
+            buildCollections(
+                listOf(app("a", AppCategory.PRODUCTIVITY)),
+                emptyList(), emptyMap(), hidden = s1.hidden,
+            ),
+        )
+    }
+
+    @Test
+    fun `add to a card when shown nowhere becomes primary`() {
+        val s = addMembership(
+            state(hidden = setOf("com.a/Main")),
+            "com.a/Main", "PRODUCTIVITY", "MUSIC", known,
+        )
+        assertEquals("MUSIC", s.overrides["com.a/Main"])
+        assertTrue(s.hidden.isEmpty())
+    }
+
+    @Test
+    fun `extras dedupe and stale keys ignored`() {
+        val s = addMembership(
+            state(extras = mapOf("MUSIC" to listOf("com.a/Main"))),
+            "com.a/Main", "PRODUCTIVITY", "MUSIC", known,
+        )
+        assertEquals(listOf("com.a/Main"), s.extras["MUSIC"])
+        // Stale category key does not create a card.
+        assertFalse(
+            buildCollections(
+                listOf(app("a", AppCategory.PRODUCTIVITY)),
+                emptyList(), emptyMap(),
+                extras = mapOf("STALE" to listOf("com.a/Main")),
+            ).any { it.first.key == "STALE" },
+        )
     }
 }

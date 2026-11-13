@@ -3,6 +3,7 @@ package com.vibiate.launcher.data
 import android.content.Context
 import com.vibiate.launcher.R
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -38,6 +39,7 @@ class SettingsRepository(private val context: Context) {
         val CATEGORY_ORDER = stringPreferencesKey("category_order") // newline-joined category keys
         val APP_ORDER = stringPreferencesKey("app_order") // newline-joined "categoryKey=ck1|ck2|..."
         val HIDDEN_APPS = stringPreferencesKey("collections_hidden") // newline-joined componentKeys
+        val CATEGORY_EXTRAS = stringPreferencesKey("category_extras") // newline-joined "categoryKey=ck1|ck2"
         val SPACES = stringPreferencesKey("spaces") // newline-joined SpaceDef.serialize(); absent = defaults
         val SPACES_AUTO = booleanPreferencesKey("spaces_auto") // auto-switch on/off
         val SPACE_FALLBACK = intPreferencesKey("space_fallback") // space id when nothing matches
@@ -46,6 +48,7 @@ class SettingsRepository(private val context: Context) {
         val PLACE_WORK = stringPreferencesKey("place_work") // SavedPlace.serialize()
         val CAR_BT_DEVICES = stringPreferencesKey("car_bt_devices") // newline "address|name"
         val SPACES_CONTENT_SEEDED = booleanPreferencesKey("spaces_content_seeded")
+        val ALLOW_ROTATION = booleanPreferencesKey("allow_rotation")
     }
 
     private val store get() = context.vibiateDataStore
@@ -254,6 +257,9 @@ class SettingsRepository(private val context: Context) {
             p[Keys.CATEGORY_ORDER] = (
                 p[Keys.CATEGORY_ORDER]?.split('\n') ?: emptyList()
                 ).filter { it != key }.joinToString("\n")
+            p[Keys.CATEGORY_EXTRAS] = serializeAppOrder(
+                parseAppOrder(p[Keys.CATEGORY_EXTRAS]) - key
+            )
         }
     }
 
@@ -316,6 +322,20 @@ class SettingsRepository(private val context: Context) {
     /** Per-category pinned app order (componentKeys in drag order). */
     val appOrder: Flow<Map<String, List<String>>> = store.data.map {
         parseAppOrder(it[Keys.APP_ORDER])
+    }
+
+    /** Extra card memberships: categoryKey -> componentKeys shown there too. */
+    val categoryExtras: Flow<Map<String, List<String>>> = store.data.map {
+        parseAppOrder(it[Keys.CATEGORY_EXTRAS])
+    }
+
+    /** Follow the system auto-rotate setting; off = locked portrait. */
+    val allowRotation: Flow<Boolean> = store.data.map {
+        it[Keys.ALLOW_ROTATION] ?: false
+    }
+
+    suspend fun setAllowRotation(allow: Boolean) {
+        store.edit { it[Keys.ALLOW_ROTATION] = allow }
     }
 
     /** Apps hidden from every Collections panel (kept in A–Z, dock, etc.). */
@@ -458,24 +478,64 @@ class SettingsRepository(private val context: Context) {
     suspend fun applyAppDrop(
         componentKey: String,
         autoKey: String,
+        sourceKey: String?,
         targetKey: String,
         targetOrder: List<String>,
     ) {
         store.edit { p ->
-            val map = parseOverrides(p[Keys.CATEGORY_OVERRIDES]).toMutableMap()
-            if (targetKey == autoKey) map.remove(componentKey)
-            else map[componentKey] = targetKey
-            p[Keys.CATEGORY_OVERRIDES] = serializeOverrides(map)
+            val state = readCategoryState(p)
+            val known = knownCategoryKeys(p)
+            val next = when {
+                sourceKey == null || sourceKey == targetKey ->
+                    addMembership(state, componentKey, autoKey, targetKey, known)
+                else -> moveMembership(
+                    state, componentKey, autoKey, sourceKey, targetKey, known,
+                )
+            }
+            writeCategoryState(p, next)
             val orders = parseAppOrder(p[Keys.APP_ORDER]).toMutableMap()
             orders[targetKey] = targetOrder
             p[Keys.APP_ORDER] = serializeAppOrder(orders)
-            // Dragging a hidden app into a category un-hides it.
-            val hidden = p[Keys.HIDDEN_APPS]?.split('\n')
-                ?.filter(String::isNotBlank).orEmpty()
-            if (componentKey in hidden) {
-                p[Keys.HIDDEN_APPS] = hidden
-                    .filter { it != componentKey }.joinToString("\n")
-            }
+        }
+    }
+
+    /** Long-press "Remove from <card>" / unticking in Add apps. */
+    suspend fun removeMembership(
+        componentKey: String,
+        autoKey: String,
+        sourceKey: String,
+    ) {
+        store.edit { p ->
+            writeCategoryState(
+                p,
+                removeMembership(
+                    readCategoryState(p), componentKey, autoKey, sourceKey,
+                    knownCategoryKeys(p),
+                ),
+            )
+        }
+    }
+
+    /** "Move to category…" from a card / adding a membership. */
+    suspend fun moveMembership(
+        componentKey: String,
+        autoKey: String,
+        sourceKey: String?,
+        targetKey: String,
+    ) {
+        store.edit { p ->
+            val state = readCategoryState(p)
+            val known = knownCategoryKeys(p)
+            writeCategoryState(
+                p,
+                if (sourceKey == null) {
+                    addMembership(state, componentKey, autoKey, targetKey, known)
+                } else {
+                    moveMembership(
+                        state, componentKey, autoKey, sourceKey, targetKey, known,
+                    )
+                },
+            )
         }
     }
 
@@ -507,6 +567,28 @@ class SettingsRepository(private val context: Context) {
             map.entries.joinToString("\n") { (k, v) -> "$k=$v" }
 
         // "categoryKey=ck1|ck2|..." per line; neither '=' nor '|' appears in keys.
+        private fun readCategoryState(p: MutablePreferences) = CategoryState(
+            overrides = parseOverrides(p[Keys.CATEGORY_OVERRIDES]),
+            extras = parseAppOrder(p[Keys.CATEGORY_EXTRAS]),
+            hidden = p[Keys.HIDDEN_APPS]?.split('\n')
+                ?.filter(String::isNotBlank)?.toSet() ?: emptySet(),
+            appOrder = parseAppOrder(p[Keys.APP_ORDER]),
+        )
+
+        private fun writeCategoryState(p: MutablePreferences, s: CategoryState) {
+            p[Keys.CATEGORY_OVERRIDES] = serializeOverrides(s.overrides)
+            p[Keys.CATEGORY_EXTRAS] = serializeAppOrder(s.extras)
+            p[Keys.HIDDEN_APPS] = s.hidden.joinToString("\n")
+            p[Keys.APP_ORDER] = serializeAppOrder(s.appOrder)
+        }
+
+        /** Built-in names + custom:* keys, for the membership pure functions. */
+        private fun knownCategoryKeys(p: MutablePreferences): Set<String> =
+            AppCategory.entries.mapTo(HashSet()) { it.name } +
+                (p[Keys.CUSTOM_CATEGORIES]?.split('\n')
+                    ?.mapNotNull(UserCategory::deserialize)
+                    ?.map { it.key } ?: emptyList())
+
         private fun parseAppOrder(raw: String?): Map<String, List<String>> =
             raw?.split('\n')
                 ?.mapNotNull { line ->

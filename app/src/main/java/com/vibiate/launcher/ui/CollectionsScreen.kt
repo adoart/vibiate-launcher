@@ -62,6 +62,7 @@ import com.vibiate.launcher.data.IconTheme
 import com.vibiate.launcher.data.SettingsRepository
 import com.vibiate.launcher.data.UserCategory
 import com.vibiate.launcher.data.dockKey
+import com.vibiate.launcher.data.AppCategory
 import com.vibiate.launcher.data.buildCollections
 import com.vibiate.launcher.ui.components.AddAppsDialog
 import com.vibiate.launcher.ui.components.AviateSearchBar
@@ -109,16 +110,20 @@ fun CollectionsScreen(
     val appOrderOrNull by settings.appOrder.collectAsState(initial = null)
     val hiddenOrNull by settings.hiddenFromCollections
         .collectAsState(initial = null)
+    val extrasOrNull by settings.categoryExtras
+        .collectAsState(initial = null)
     val customCategories = customCategoriesOrNull.orEmpty()
     val overrides = overridesOrNull.orEmpty()
     val categoryOrder = categoryOrderOrNull.orEmpty()
     val appOrder = appOrderOrNull.orEmpty()
     val hidden = hiddenOrNull.orEmpty()
+    val extras = extrasOrNull.orEmpty()
     val settingsLoaded = customCategoriesOrNull != null &&
         overridesOrNull != null &&
         categoryOrderOrNull != null &&
         appOrderOrNull != null &&
-        hiddenOrNull != null
+        hiddenOrNull != null &&
+        extrasOrNull != null
 
     // Expanded/collapsed per category key, surviving config change.
     val expandedState = rememberSaveable {
@@ -128,10 +133,11 @@ fun CollectionsScreen(
 
     val collections = remember(
         apps, customCategories, overrides, categoryOrder, appOrder, hidden,
+        extras,
     ) {
         buildCollections(
             apps, customCategories, overrides, categoryOrder, appOrder,
-            hidden,
+            hidden, extras,
         )
     }
 
@@ -141,8 +147,9 @@ fun CollectionsScreen(
     var addAppsDef by remember { mutableStateOf<CollectionDef?>(null) }
     var editCategory by remember { mutableStateOf<UserCategory?>(null) }
     var deleteCategory by remember { mutableStateOf<UserCategory?>(null) }
-    var appMenuApp by remember { mutableStateOf<AppEntry?>(null) }
-    var moveApp by remember { mutableStateOf<AppEntry?>(null) }
+    // (app, card key it was opened from)
+    var appMenuApp by remember { mutableStateOf<Pair<AppEntry, String>?>(null) }
+    var moveApp by remember { mutableStateOf<Pair<AppEntry, String>?>(null) }
     var iconPickApp by remember { mutableStateOf<AppEntry?>(null) }
 
     // ---- Drag preview ----
@@ -154,8 +161,8 @@ fun CollectionsScreen(
         // (copy semantics — the icon stays where it came from).
         val app: AppEntry? = when (p) {
             is DragPayload.App -> p.app
-            is DragPayload.Dock -> p.entry.component?.let { cn ->
-                apps.firstOrNull { it.componentKey == dockKey(cn) }
+            is DragPayload.Dock -> p.entry.key?.let { k ->
+                apps.firstOrNull { it.componentKey == k }
             }
             is DragPayload.Shortcut -> p.app
             else -> null
@@ -255,8 +262,8 @@ fun CollectionsScreen(
     }
     val isAppDrag = drag.payload is DragPayload.App ||
         drag.payload is DragPayload.Shortcut ||
-        (drag.payload as? DragPayload.Dock)?.entry?.component?.let { cn ->
-            apps.any { it.componentKey == dockKey(cn) }
+        (drag.payload as? DragPayload.Dock)?.entry?.key?.let { k ->
+            apps.any { it.componentKey == k }
         } == true
     val isCategoryDrag = drag.payload is DragPayload.Category
     val draggedCategoryKey = (drag.payload as? DragPayload.Category)?.def?.key
@@ -276,10 +283,8 @@ fun CollectionsScreen(
                 // semantics — it stays in the dock).
                 val app: AppEntry? = when (payload) {
                     is DragPayload.App -> payload.app
-                    is DragPayload.Dock -> payload.entry.component?.let { cn ->
-                        latestApps.firstOrNull {
-                            it.componentKey == dockKey(cn)
-                        }
+                    is DragPayload.Dock -> payload.entry.key?.let { k ->
+                        latestApps.firstOrNull { it.componentKey == k }
                     }
                     is DragPayload.Shortcut -> payload.app
                     else -> null
@@ -293,6 +298,8 @@ fun CollectionsScreen(
                                 settings.applyAppDrop(
                                     componentKey = app.componentKey,
                                     autoKey = app.category.name,
+                                    sourceKey = (payload as? DragPayload.App)
+                                        ?.sourceKey,
                                     targetKey = key,
                                     targetOrder = order,
                                 )
@@ -418,7 +425,7 @@ fun CollectionsScreen(
                             } else {
                                 null
                             },
-                            onAppLongPress = { appMenuApp = it },
+                            onAppLongPress = { appMenuApp = it to def.key },
                         )
                     }
                     CategoryDropPlaceholder -> Box(
@@ -488,9 +495,18 @@ fun CollectionsScreen(
     }
 
     addAppsDef?.let { def ->
-        // Hidden apps start unticked so ticking them brings them back.
-        val initiallySelected = remember(def, overrides, hidden) {
-            overrides.filterValues { it == def.key }.keys - hidden
+        // Ticked = apps currently shown in this card (primary or extra).
+        val knownKeys = remember(customCategories) {
+            AppCategory.entries.mapTo(HashSet()) { it.name } +
+                customCategories.map { it.key }
+        }
+        val initiallySelected = remember(def, overrides, hidden, extras, apps) {
+            val shown = apps.filter {
+                it.componentKey !in hidden &&
+                    (overrides[it.componentKey]?.takeIf { k -> k in knownKeys }
+                        ?: it.category.name) == def.key
+            }.mapTo(HashSet()) { it.componentKey }
+            shown + (extras[def.key] ?: emptyList())
         }
         AddAppsDialog(
             category = def,
@@ -499,14 +515,21 @@ fun CollectionsScreen(
             iconTheme = iconTheme,
             onConfirm = { selected ->
                 addAppsDef = null
-                val inCategory = overrides
-                    .filterValues { it == def.key }.keys - hidden
-                val toAdd = selected - inCategory
-                val toRemove = inCategory - selected
+                val shownNow = initiallySelected
+                val toAdd = selected - shownNow
+                val toRemove = shownNow - selected
+                val autoOf = apps.associate { it.componentKey to it.category.name }
                 scope.launch {
-                    if (toAdd.isNotEmpty()) settings.setOverrides(toAdd, def.key)
-                    if (toRemove.isNotEmpty()) settings.setOverrides(toRemove, null)
-                    if (toAdd.isNotEmpty()) settings.showInCollections(toAdd)
+                    toAdd.forEach {
+                        settings.moveMembership(
+                            it, autoOf[it] ?: "OTHER", null, def.key,
+                        )
+                    }
+                    toRemove.forEach {
+                        settings.removeMembership(
+                            it, autoOf[it] ?: "OTHER", def.key,
+                        )
+                    }
                 }
             },
             onDismiss = { addAppsDef = null },
@@ -553,7 +576,9 @@ fun CollectionsScreen(
     }
 
     // App icon long-press: move to category / app info.
-    appMenuApp?.let { app ->
+    appMenuApp?.let { (app, cardKey) ->
+        val cardTitle = collections.firstOrNull { it.first.key == cardKey }
+            ?.first?.title ?: cardKey
         AlertDialog(
             onDismissRequest = { appMenuApp = null },
             title = { Text(app.label) },
@@ -561,18 +586,20 @@ fun CollectionsScreen(
                 Column {
                     DialogTextRow(stringResource(R.string.move_to_category)) {
                         appMenuApp = null
-                        moveApp = app
+                        moveApp = app to cardKey
                     }
                     DialogTextRow(stringResource(R.string.change_icon)) {
                         appMenuApp = null
                         iconPickApp = app
                     }
                     DialogTextRow(
-                        stringResource(R.string.remove_from_collections),
+                        stringResource(R.string.remove_from_category, cardTitle),
                     ) {
                         appMenuApp = null
                         scope.launch {
-                            settings.hideFromCollections(app.componentKey)
+                            settings.removeMembership(
+                                app.componentKey, app.category.name, cardKey,
+                            )
                         }
                     }
                     DialogTextRow(stringResource(R.string.app_info)) {
@@ -589,7 +616,7 @@ fun CollectionsScreen(
         )
     }
 
-    moveApp?.let { app ->
+    moveApp?.let { (app, cardKey) ->
         val defs = collections.map { it.first }
         // Normalize stale overrides so "Automatic" is the preselection.
         val currentKey = overrides[app.componentKey]
@@ -601,8 +628,17 @@ fun CollectionsScreen(
             onSelect = { key ->
                 moveApp = null
                 scope.launch {
-                    settings.setOverride(app.componentKey, key)
-                    settings.showInCollections(listOf(app.componentKey))
+                    if (key == null) {
+                        // "Automatic": move the primary back to auto.
+                        settings.moveMembership(
+                            app.componentKey, app.category.name,
+                            cardKey, app.category.name,
+                        )
+                    } else {
+                        settings.moveMembership(
+                            app.componentKey, app.category.name, cardKey, key,
+                        )
+                    }
                 }
             },
             onDismiss = { moveApp = null },
@@ -675,12 +711,5 @@ private fun DialogTextRow(label: String, onClick: () -> Unit) {
 }
 
 private fun openAppDetails(context: Context, app: AppEntry) {
-    runCatching {
-        context.startActivity(
-            Intent(
-                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.parse("package:${app.packageName}"),
-            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
-    }
+    com.vibiate.launcher.data.openAppInfo(context, app.component, app.user)
 }

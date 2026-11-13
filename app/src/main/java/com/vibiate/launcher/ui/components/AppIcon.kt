@@ -1,18 +1,29 @@
 package com.vibiate.launcher.ui.components
 
 import android.content.Context
-import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.Drawable
-import android.net.Uri
-import android.provider.Settings
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Work
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.res.stringResource
+import com.vibiate.launcher.R
+import com.vibiate.launcher.data.openAppInfo
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -34,14 +45,57 @@ import com.vibiate.launcher.data.IconTheme
 import com.vibiate.launcher.ui.drag.DragPayload
 import com.vibiate.launcher.ui.drag.launcherDragGestures
 
-/** Opens the app's system details screen. */
+/** Opens the app's system details screen (in its own profile). */
 internal fun openAppDetails(context: Context, app: AppEntry) {
-    runCatching {
-        context.startActivity(
-            Intent(
-                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.parse("package:${app.packageName}"),
-            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    openAppInfo(context, app.component, app.user)
+}
+
+/**
+ * Icon image with the work-profile treatment: a small briefcase badge at the
+ * bottom-right for [isWork], greyed out while the work profile is [paused].
+ */
+@Composable
+fun BadgedIconImage(
+    bitmap: ImageBitmap,
+    contentDescription: String?,
+    isWork: Boolean,
+    paused: Boolean,
+    iconSize: Dp,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier.size(iconSize)) {
+        Image(
+            bitmap = bitmap,
+            contentDescription = contentDescription,
+            colorFilter = if (paused) {
+                ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
+            } else {
+                null
+            },
+            modifier = Modifier
+                .size(iconSize)
+                .alpha(if (paused) 0.5f else 1f),
+        )
+        if (isWork) WorkBadge(iconSize / 3, Modifier.align(Alignment.BottomEnd))
+    }
+}
+
+/** Small round briefcase marking a work-profile app. */
+@Composable
+fun WorkBadge(size: Dp, modifier: Modifier = Modifier) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .offset(x = size / 6, y = size / 6)
+            .size(size)
+            .background(Color(0xFF37474F), CircleShape)
+            .border(1.dp, Color.White.copy(alpha = 0.85f), CircleShape),
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Work,
+            contentDescription = stringResource(R.string.work_app),
+            tint = Color.White,
+            modifier = Modifier.size(size * 0.6f),
         )
     }
 }
@@ -105,10 +159,12 @@ fun AppIcon(
             .padding(4.dp),
     ) {
         if (bitmap != null) {
-            Image(
+            BadgedIconImage(
                 bitmap = bitmap,
                 contentDescription = app.label,
-                modifier = Modifier.size(iconSize),
+                isWork = app.isWork,
+                paused = app.paused,
+                iconSize = iconSize,
             )
         }
         if (showLabel) {

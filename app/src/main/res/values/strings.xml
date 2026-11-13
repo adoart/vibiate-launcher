@@ -305,5 +305,9 @@
     <string name="spaces_close">Close</string>
     <string name="spaces_day_letters">MTWTFSS</string>
     <string name="spaces_clear">Clear</string>
+    <string name="wallpaper_failed">Couldn’t set wallpaper</string>
+    <string name="remove_from_category">Remove from %1$s</string>
+    <string name="allow_rotation">Allow landscape (auto-rotate)</string>
+    <string name="work_app">Work app</string>
 </resources>
 

@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RestartAlt
@@ -121,6 +122,7 @@ fun SettingsScreen(
     }
 
     val themeMode by settings.themeMode.collectAsState(initial = ThemeMode.DARK)
+    val allowRotation by settings.allowRotation.collectAsState(initial = false)
     val iconPackPkg by settings.iconPackPackage.collectAsState(initial = "")
     val iconPackFallbacks by settings.iconPackFallbacks.collectAsState(
         initial = emptyList()
@@ -191,6 +193,19 @@ fun SettingsScreen(
                     }) {
                         RadioButton(selected = themeMode == mode, onClick = null)
                     }
+                }
+            }
+            item(key = "allow_rotation") {
+                AviateRow(
+                    Icons.Filled.ScreenRotation,
+                    stringResource(R.string.allow_rotation),
+                ) {
+                    Switch(
+                        checked = allowRotation,
+                        onCheckedChange = {
+                            scope.launch { settings.setAllowRotation(it) }
+                        },
+                    )
                 }
             }
 

@@ -87,22 +87,39 @@ fun buildCollections(
     categoryOrder: List<String> = emptyList(),
     appOrder: Map<String, List<String>> = emptyMap(),
     hidden: Set<String> = emptySet(),
+    extras: Map<String, List<String>> = emptyMap(),
 ): List<Pair<CollectionDef, List<AppEntry>>> {
-    val shown = if (hidden.isEmpty()) apps
-    else apps.filterNot { it.componentKey in hidden }
+    val byKeyOf = apps.associateBy { it.componentKey }
     val customKeys = custom.mapTo(HashSet()) { it.key }
     val builtInNames = AppCategory.entries.mapTo(HashSet()) { it.name }
+    val known = customKeys + builtInNames
 
     fun effectiveKey(app: AppEntry): String {
         val override = overrides[app.componentKey]
-        return if (override != null && (override in customKeys || override in builtInNames)) {
+        return if (override != null && override in known) {
             override
         } else {
             app.category.name
         }
     }
 
-    val byKey = shown.groupBy(::effectiveKey)
+    val byKey = mutableMapOf<String, MutableList<AppEntry>>()
+    apps.forEach { app ->
+        if (app.componentKey !in hidden) {
+            byKey.getOrPut(effectiveKey(app)) { mutableListOf() } += app
+        }
+    }
+    // Extra memberships: stale/unknown category keys ignored; an app never
+    // appears twice in the same card.
+    extras.forEach { (cat, keys) ->
+        if (cat !in known) return@forEach
+        keys.forEach { k ->
+            byKeyOf[k]?.let { app ->
+                val list = byKey.getOrPut(cat) { mutableListOf() }
+                if (app !in list) list += app
+            }
+        }
+    }
 
     val default = mutableListOf<Pair<CollectionDef, List<AppEntry>>>()
     custom.forEach { cat ->
@@ -114,7 +131,7 @@ fun buildCollections(
         ) to (byKey[cat.key] ?: emptyList())
     }
     AppCategory.ordered.forEach { cat ->
-        val list = byKey[cat.name] ?: emptyList()
+        val list = byKey[cat.name].orEmpty()
         if (list.isNotEmpty()) {
             default += CollectionDef(
                 key = cat.name,
@@ -146,4 +163,90 @@ fun <T> List<T>.withMoved(item: T, index: Int): List<T> {
     list.remove(item)
     list.add(index.coerceIn(0, list.size), item)
     return list
+}
+
+// ---- Multi-card membership (Part B) ----
+
+/**
+ * The persisted category state a membership transform acts on: primary
+ * overrides, extra memberships, the hidden set (removed-from-primary only)
+ * and per-card pinned app order.
+ */
+data class CategoryState(
+    val overrides: Map<String, String>,
+    val extras: Map<String, List<String>>,
+    val hidden: Set<String>,
+    val appOrder: Map<String, List<String>>,
+)
+
+private fun effectivePrimary(state: CategoryState, key: String, autoKey: String, known: Set<String>): String {
+    val o = state.overrides[key]
+    return if (o != null && o in known) o else autoKey
+}
+
+private fun shownCards(state: CategoryState, key: String, autoKey: String, known: Set<String>): Set<String> {
+    val cards = mutableSetOf<String>()
+    if (key !in state.hidden) cards += effectivePrimary(state, key, autoKey, known)
+    state.extras.forEach { (cat, keys) -> if (key in keys && cat in known) cards += cat }
+    return cards
+}
+
+/** Add [key] to [target] (un-hide as needed) without leaving other cards. */
+fun addMembership(state: CategoryState, key: String, autoKey: String, target: String, known: Set<String>): CategoryState {
+    val primary = effectivePrimary(state, key, autoKey, known)
+    // Target is the primary card: just un-hide (never also list it as extra).
+    if (target == primary) return state.copy(hidden = state.hidden - key)
+    if (shownCards(state, key, autoKey, known).isEmpty()) {
+        // Shown nowhere: the target becomes the primary.
+        val overrides = state.overrides.toMutableMap()
+        if (target == autoKey) overrides.remove(key) else overrides[key] = target
+        return state.copy(overrides = overrides, hidden = state.hidden - key)
+    }
+    val extras = state.extras.toMutableMap()
+    extras[target] = ((extras[target] ?: emptyList()) + key).distinct()
+    return state.copy(extras = extras, hidden = state.hidden - key)
+}
+
+/** Remove [key] from [source]; hiding the primary still keeps extras. */
+fun removeMembership(state: CategoryState, key: String, autoKey: String, source: String, known: Set<String>): CategoryState {
+    val order = state.appOrder.toMutableMap()
+    order[source] = (order[source] ?: emptyList()) - key
+    if (key in (state.extras[source] ?: emptyList())) {
+        val extras = state.extras.toMutableMap()
+        extras[source] = extras[source].orEmpty() - key
+        return state.copy(extras = extras, appOrder = order)
+    }
+    val primary = effectivePrimary(state, key, autoKey, known)
+    if (source == primary) {
+        return state.copy(hidden = state.hidden + key, appOrder = order)
+    }
+    return state.copy(appOrder = order)
+}
+
+/** Move [key]'s membership from [source] to [target]. */
+fun moveMembership(
+    state: CategoryState,
+    key: String,
+    autoKey: String,
+    source: String,
+    target: String,
+    known: Set<String>,
+): CategoryState {
+    if (source == target) return state
+    val primary = effectivePrimary(state, key, autoKey, known)
+    return if (source == primary && key !in state.hidden) {
+        // Moving the visible primary: target becomes the primary.
+        val overrides = state.overrides.toMutableMap()
+        if (target == autoKey) overrides.remove(key) else overrides[key] = target
+        val extras = state.extras.toMutableMap()
+        extras[target] = extras[target].orEmpty() - key
+        val order = state.appOrder.toMutableMap()
+        order[source] = (order[source] ?: emptyList()) - key
+        state.copy(overrides = overrides, extras = extras, appOrder = order)
+    } else {
+        addMembership(
+            removeMembership(state, key, autoKey, source, known),
+            key, autoKey, target, known,
+        )
+    }
 }

@@ -7,6 +7,9 @@ import android.content.ContextWrapper
 import android.os.Build
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -84,6 +87,7 @@ import com.vibiate.launcher.data.SpaceReason
 import com.vibiate.launcher.data.spaceScreenId
 import com.vibiate.launcher.data.ThemeMode
 import com.vibiate.launcher.data.WallpaperRotator
+import com.vibiate.launcher.ui.components.BadgedIconImage
 import com.vibiate.launcher.ui.components.LauncherDock
 import com.vibiate.launcher.ui.components.LauncherPageIndicator
 import com.vibiate.launcher.ui.components.LauncherTab
@@ -183,6 +187,12 @@ fun LauncherRoot(
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showCustomize by rememberSaveable { mutableStateOf(false) }
     var widgetPickerTarget by remember { mutableStateOf<Int?>(null) }
+
+    // Single-wallpaper picker: hoisted here so it survives the sheet that
+    // launched it being dismissed (result dropped otherwise).
+    val singleWallpaperPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri -> uri?.let { wallpaperRotator.applySingle(it) } }
     // Set by the Spaces header's Tune button / settings' "Add widget":
     // opens Settings inside that space's editor, or stages a space widget add.
     var settingsSpaceId by remember { mutableStateOf<Int?>(null) }
@@ -231,7 +241,7 @@ fun LauncherRoot(
     }
 
     fun launch(app: AppEntry) {
-        context.startActivity(appRepository.launchIntent(app))
+        appRepository.launch(app)
     }
 
     // Space activations: show the page and/or launch the configured app,
@@ -696,6 +706,13 @@ fun LauncherRoot(
                 appRepository = appRepository,
                 dockRepository = dockRepository,
                 wallpaperRotator = wallpaperRotator,
+                onPickSingleWallpaper = {
+                    singleWallpaperPicker.launch(
+                        PickVisualMediaRequest(
+                            ActivityResultContracts.PickVisualMedia.ImageOnly,
+                        ),
+                    )
+                },
                 gridSize = gridSize,
                 fontFamily = fontFamily,
                 onDismiss = { showCustomize = false },
@@ -854,7 +871,21 @@ private fun DragGhost(iconTheme: IconTheme?) {
                             shadowElevation = 24f
                         },
                 ) {
-                    bitmap?.let { Image(it, contentDescription = null) }
+                    val isWork = when (payload) {
+                        is DragPayload.App -> payload.app.isWork
+                        is DragPayload.Dock -> payload.entry.isWork
+                        is DragPayload.Shortcut -> payload.app.isWork
+                        else -> false
+                    }
+                    bitmap?.let {
+                        BadgedIconImage(
+                            bitmap = it,
+                            contentDescription = null,
+                            isWork = isWork,
+                            paused = false,
+                            iconSize = 56.dp,
+                        )
+                    }
                 }
             }
             is DragPayload.Category -> {

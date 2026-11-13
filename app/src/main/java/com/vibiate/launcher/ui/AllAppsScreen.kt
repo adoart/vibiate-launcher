@@ -106,6 +106,8 @@ fun AllAppsScreen(
     val scope = rememberCoroutineScope()
     val hiddenApps by settings.hiddenFromCollections
         .collectAsState(initial = emptySet())
+    val categoryExtras by settings.categoryExtras
+        .collectAsState(initial = emptyMap())
 
     Column(Modifier.fillMaxSize()) {
         AviateSearchBar(
@@ -168,7 +170,11 @@ fun AllAppsScreen(
             title = { Text(app.label) },
             text = {
                 Column {
-                    if (app.componentKey in hiddenApps) {
+                    if (app.componentKey in hiddenApps &&
+                        categoryExtras.values.none {
+                            app.componentKey in it
+                        }
+                    ) {
                         Text(
                             text = stringResource(R.string.show_in_collections),
                             color = MaterialTheme.colorScheme.onSurface,

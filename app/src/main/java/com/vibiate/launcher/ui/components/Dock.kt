@@ -56,7 +56,8 @@ import com.vibiate.launcher.R
 import com.vibiate.launcher.data.DockEntry
 import com.vibiate.launcher.data.DockRepository
 import com.vibiate.launcher.data.IconTheme
-import com.vibiate.launcher.data.dockKey
+import com.vibiate.launcher.data.launchComponent
+import com.vibiate.launcher.data.openAppInfo
 import com.vibiate.launcher.data.dockPlace
 import com.vibiate.launcher.data.dockRemove
 import com.vibiate.launcher.ui.drag.DragPayload
@@ -96,13 +97,13 @@ fun LauncherDock(
     val preview: DockPreview by remember {
         derivedStateOf {
             val real = entries
-            val slots = real.map { e -> e?.component?.let(::dockKey) }
+            val slots = real.map { e -> e?.key }
             when (val payload = drag.payload) {
                 is DragPayload.Dock -> {
                     // The dragged icon's real cell stays composed (hidden):
                     // its node hosts the gesture coroutine — swapping it for
                     // another composable killed the stream before.
-                    val key = payload.entry.component?.let(::dockKey)
+                    val key = payload.entry.key
                     val i = hoveredSlot.value
                     if (key == null || i < 0) {
                         DockPreview(
@@ -117,7 +118,7 @@ fun LauncherDock(
                             newSlots.map { k ->
                                 k?.let { kk ->
                                     real.firstOrNull { e ->
-                                        e?.component?.let(::dockKey) == kk
+                                        e?.key == kk
                                     }
                                 }
                             },
@@ -143,7 +144,7 @@ fun LauncherDock(
                         val cells = newSlots.map { k ->
                             k?.let { kk ->
                                 real.firstOrNull { e ->
-                                    e?.component?.let(::dockKey) == kk
+                                    e?.key == kk
                                 }
                             }
                         }.toMutableList()
@@ -168,8 +169,8 @@ fun LauncherDock(
                 false
             } else when (p) {
                 is DragPayload.Dock ->
-                    p.entry.component?.let { cn ->
-                        repository.edit { dockRemove(it, dockKey(cn)) }
+                    p.entry.key?.let { cn ->
+                        repository.edit { dockRemove(it, cn) }
                         true
                     } ?: false
                 is DragPayload.Shortcut -> {
@@ -203,11 +204,11 @@ fun LauncherDock(
                     if (drag.rects["dock"]?.contains(pt) != true) {
                         false
                     } else {
-                        p.entry.component?.let { cn ->
+                        p.entry.key?.let { cn ->
                             val idx = dockTargetIndex(pt, drag)
                             if (idx < 0 || idx == p.fromIndex) false else {
                                 repository.edit {
-                                    dockPlace(it, dockKey(cn), idx, p.fromIndex)
+                                    dockPlace(it, cn, idx, p.fromIndex)
                                 }
                                 true
                             }
@@ -303,8 +304,8 @@ fun LauncherDock(
                     onMenuOpen = { menuIndex = it },
                     onMenuDismiss = { menuIndex = null },
                     onRemove = { idx ->
-                        entries.getOrNull(idx)?.component?.let { cn ->
-                            repository.edit { dockRemove(it, dockKey(cn)) }
+                        entries.getOrNull(idx)?.key?.let { cn ->
+                            repository.edit { dockRemove(it, cn) }
                         }
                     },
                 )
@@ -318,8 +319,8 @@ fun LauncherDock(
                 onMenuOpen = { menuIndex = it },
                 onMenuDismiss = { menuIndex = null },
                 onRemove = { idx ->
-                    entries.getOrNull(idx)?.component?.let { cn ->
-                        repository.edit { dockRemove(it, dockKey(cn)) }
+                    entries.getOrNull(idx)?.key?.let { cn ->
+                        repository.edit { dockRemove(it, cn) }
                     }
                 },
             )
@@ -435,7 +436,14 @@ private fun DockIcon(
                 payload = {
                     entry.component?.let { DragPayload.Dock(entry, index) }
                 },
-                onTap = { runCatching { context.startActivity(entry.intent) } },
+                onTap = {
+                    val cn = entry.component
+                    if (entry.user != null && cn != null) {
+                        launchComponent(context, cn, entry.user)
+                    } else {
+                        runCatching { context.startActivity(entry.intent) }
+                    }
+                },
                 onLongPressNoMove = { onMenuOpen() },
             ),
         contentAlignment = Alignment.Center,
@@ -500,16 +508,7 @@ private fun DockIcon(
                 },
                 onClick = {
                     onMenuDismiss()
-                    entry.component?.let { component ->
-                        runCatching {
-                            context.startActivity(
-                                Intent(
-                                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                    Uri.parse("package:${component.packageName}"),
-                                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
-                        }
-                    }
+                    entry.component?.let { openAppInfo(context, it, entry.user) }
                 },
             )
         }
@@ -529,10 +528,13 @@ private fun DockIconVisual(
     }
     val mod = Modifier.size(48.dp).graphicsLayer { this.alpha = alpha }
     if (bitmap != null) {
-        Image(
+        BadgedIconImage(
             bitmap = bitmap,
             contentDescription = entry.label,
-            modifier = mod,
+            isWork = entry.isWork,
+            paused = false,
+            iconSize = 48.dp,
+            modifier = Modifier.graphicsLayer { this.alpha = alpha },
         )
     } else {
         Icon(
