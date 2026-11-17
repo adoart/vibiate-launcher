@@ -1,1 +1,2 @@
-# No special rules needed for debug-oriented launcher.
+# No app-specific rules needed: no reflection, and libraries ship their own
+# consumer ProGuard rules. The default proguard-android-optimize.txt rules apply.

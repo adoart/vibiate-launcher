@@ -13,3 +13,9 @@
 - APKs for the user's phone go in the repo's `build/` folder (git-ignored),
   named `Vibiate-<versionName>-<short commit>.apk`, built from a clean,
   committed tree — not on the Desktop.
+- Phone builds are release builds (`assembleRelease` →
+  `app/build/outputs/apk/release/app-release.apk`): R8-minified,
+  non-debuggable, and deliberately signed with this machine's debug keystore
+  so they install as updates over earlier builds without losing the layout.
+  The release build isn't debuggable, so `run-as` only works with the debug
+  build installed; keep the debug build on the emulator for development.
