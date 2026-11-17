@@ -65,6 +65,9 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Move the old global car-device list onto car-enabled spaces.
+        lifecycleScope.launch { app.settingsRepository.migrateCarBtDevices() }
+
         // Seed each default space's app icons once (spaces' grids only get
         // shortcuts, never widgets, from this path).
         lifecycleScope.launch {

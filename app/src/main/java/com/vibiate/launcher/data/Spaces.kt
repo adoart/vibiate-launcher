@@ -96,6 +96,44 @@ data class SavedPlace(val lat: Double, val lng: Double, val radiusM: Int = 200) 
 /** A location fix, reduced to what matching needs. */
 data class LatLng(val lat: Double, val lng: Double, val accuracyM: Float = 0f)
 
+/** A picked Bluetooth device; [address] is normalized to uppercase. */
+data class BtDevice(val address: String, val name: String) {
+    val normalizedAddress get() = address.uppercase()
+}
+
+/**
+ * Headphone signal from the audio-output list: every picked space
+ * Bluetooth device is excluded so a car stereo no longer counts.
+ * A blank-address BT output (pre-API-28 / anonymized) counts only when the
+ * connected set has a device that isn't excluded.
+ */
+data class AudioOut(val bluetooth: Boolean, val address: String)
+
+fun headphonesActive(
+    outputs: List<AudioOut>,
+    btConnected: Set<String>,
+    excluded: Set<String>,
+): Boolean = outputs.any { out ->
+    when {
+        !out.bluetooth -> true
+        out.address.isNotBlank() -> out.address.uppercase() !in excluded
+        else -> btConnected.isEmpty() ||
+            btConnected.any { it.uppercase() !in excluded }
+    }
+}
+
+/** Move the global car-device pref onto every space with `car == true`. */
+fun migrateCarBtDevices(
+    spaces: List<SpaceDef>,
+    devices: List<BtDevice>,
+): List<SpaceDef> = spaces.map { s ->
+    if (!s.car) s
+    else s.copy(
+        btDevices = (s.btDevices + devices)
+            .distinctBy { it.normalizedAddress },
+    )
+}
+
 data class SpaceDef(
     val id: Int,
     val name: String,
@@ -106,6 +144,8 @@ data class SpaceDef(
     val headphones: Boolean = false,
     val place: PlaceTrigger = PlaceTrigger.NONE,
     val car: Boolean = false,
+    /** Picked Bluetooth devices that activate this space on connect. */
+    val btDevices: List<BtDevice> = emptyList(),
     /** Jump to the Spaces page when this space activates. */
     val showOnActivate: Boolean = false,
     /** componentKey of an app to launch when this space activates. */
@@ -146,6 +186,9 @@ data class SpaceDef(
             reasons += SpaceReason.PLACE
         }
         if (car && signals.carConnected) reasons += SpaceReason.CAR
+        if (btDevices.any { it.normalizedAddress in signals.btConnected }) {
+            reasons += SpaceReason.BLUETOOTH
+        }
         return reasons
     }
 
@@ -155,6 +198,15 @@ data class SpaceDef(
             if (headphones) ({ signals.headphones }) else null,
             if (place != PlaceTrigger.NONE) ({ placeMatches(signals) }) else null,
             if (car) ({ signals.carConnected }) else null,
+            if (btDevices.isNotEmpty()) {
+                ({
+                    btDevices.any {
+                        it.normalizedAddress in signals.btConnected
+                    }
+                })
+            } else {
+                null
+            },
         )
         if (configured.isEmpty()) return false
         return when (match) {
@@ -182,6 +234,15 @@ data class SpaceDef(
         append('|').append(car)
         append('|').append(showOnActivate)
         append('|').append(launchOnActivate ?: "")
+        // 15th field: devices comma-joined as "ADDR=name".
+        append('|').append(
+            btDevices.joinToString(",") { d ->
+                d.normalizedAddress + "=" +
+                    d.name.replace('|', ' ').replace(',', ' ')
+                        .replace('=', ' ').replace('\n', ' ')
+                        .replace('\r', ' ')
+            },
+        )
     }
 
     companion object {
@@ -210,9 +271,20 @@ data class SpaceDef(
             val car = p[11].toBooleanStrictOrNull() ?: false
             val showOnActivate = p[12].toBooleanStrictOrNull() ?: false
             val launchKey = p[13].ifBlank { null }
+            val devices = p.getOrNull(14)?.let { field ->
+                field.split(',')
+                    .mapNotNull { part ->
+                        val eq = part.indexOf('=')
+                        if (eq <= 0) return@mapNotNull null
+                        BtDevice(
+                            part.substring(0, eq).uppercase(),
+                            part.substring(eq + 1),
+                        )
+                    }
+            } ?: emptyList()
             return SpaceDef(
                 id, name, glyph, autoEnabled, match, time, headphones,
-                place, car, showOnActivate, launchKey,
+                place, car, devices, showOnActivate, launchKey,
             )
         }
     }
@@ -222,7 +294,10 @@ data class SpaceDef(
 data class SpaceSignals(
     val now: LocalDateTime,
     val headphones: Boolean,
+    /** Car mode / Android Auto only — not a chosen BT device. */
     val carConnected: Boolean,
+    /** Uppercase MAC addresses of connected Bluetooth devices. */
+    val btConnected: Set<String> = emptySet(),
     val location: LatLng?,
     val home: SavedPlace?,
     val work: SavedPlace?,
@@ -244,7 +319,9 @@ data class ManualPick(val spaceId: Int, val autoIdAtPick: Int?) {
     }
 }
 
-enum class SpaceReason { TIME, HEADPHONES, PLACE, CAR, MANUAL, FALLBACK }
+enum class SpaceReason {
+    TIME, HEADPHONES, PLACE, CAR, BLUETOOTH, MANUAL, FALLBACK,
+}
 
 data class SpaceResolution(
     val spaceId: Int,

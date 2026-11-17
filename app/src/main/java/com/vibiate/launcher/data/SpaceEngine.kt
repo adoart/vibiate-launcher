@@ -54,7 +54,7 @@ class SpaceEngine(
     private val started = AtomicBoolean(false)
 
     private val now = MutableStateFlow(LocalDateTime.now())
-    private val headphones = MutableStateFlow(false)
+    private val audioOutputs = MutableStateFlow<List<AudioOut>>(emptyList())
     private val carMode = MutableStateFlow(false)
     private val connectedBt = MutableStateFlow<Set<String>>(emptySet())
     private val location = MutableStateFlow<LatLng?>(null)
@@ -107,11 +107,16 @@ class SpaceEngine(
     }
 
     private val audioCallback = object : AudioDeviceCallback() {
-        override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) =
+        private fun refresh() {
             refreshHeadphones()
+            refreshBt()
+        }
+
+        override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) =
+            refresh()
 
         override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) =
-            refreshHeadphones()
+            refresh()
     }
 
     private val carReceiver = object : BroadcastReceiver() {
@@ -179,6 +184,7 @@ class SpaceEngine(
                 if (!started.get()) break
                 now.value = LocalDateTime.now()
                 refreshCarMode()
+                refreshBt()
             }
         }
         scope.launch { fetchCurrentLocationOnce() }
@@ -223,10 +229,32 @@ class SpaceEngine(
 
     // ---- Signals ----
 
+    private val btOutputTypes = mutableSetOf(
+        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+        AudioDeviceInfo.TYPE_HEARING_AID,
+    ).apply {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            add(AudioDeviceInfo.TYPE_BLE_HEADSET)
+        }
+    }
+
+    /** Matching audio outputs; chosen car devices are excluded later. */
     private fun refreshHeadphones() {
-        headphones.value = audioManager
+        audioOutputs.value = audioManager
             .getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-            .any { it.type in outputTypes }
+            .filter { it.type in outputTypes }
+            .map { d ->
+                AudioOut(
+                    bluetooth = d.type in btOutputTypes,
+                    address = if (Build.VERSION.SDK_INT >=
+                        Build.VERSION_CODES.P
+                    ) {
+                        d.address.orEmpty()
+                    } else {
+                        ""
+                    },
+                )
+            }
     }
 
     private fun refreshCarMode() {
@@ -273,13 +301,21 @@ class SpaceEngine(
                         addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
                         addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED)
                     },
-                    ContextCompat.RECEIVER_NOT_EXPORTED,
+                    // Bluetooth broadcasts come from the Bluetooth stack's
+                    // uid, not system_server — NOT_EXPORTED would get nothing.
+                    ContextCompat.RECEIVER_EXPORTED,
                 )
             }
         }
         val connected = mutableSetOf<String>()
-        runCatching { connected += a2dpProxy?.connectedDevices?.map { it.address }.orEmpty() }
-        runCatching { connected += headsetProxy?.connectedDevices?.map { it.address }.orEmpty() }
+        runCatching {
+            connected += a2dpProxy?.connectedDevices
+                ?.map { it.address.uppercase() }.orEmpty()
+        }
+        runCatching {
+            connected += headsetProxy?.connectedDevices
+                ?.map { it.address.uppercase() }.orEmpty()
+        }
         connectedBt.value = connected
     }
 
@@ -402,10 +438,9 @@ class SpaceEngine(
                 settings.spaceManual,
                 settings.placeHome,
                 settings.placeWork,
-                settings.carBtDevices,
             ) { arr -> arr }
             val signalsFlow = combine(
-                now, headphones, carMode, connectedBt, location,
+                now, audioOutputs, carMode, connectedBt, location,
             ) { arr -> arr }
             // Only a signal change may emit an activation — settings edits
             // and manual picks must never launch a space's activate actions.
@@ -418,21 +453,23 @@ class SpaceEngine(
                 val manual = s[3] as ManualPick?
                 val home = s[4] as SavedPlace?
                 val work = s[5] as SavedPlace?
-                @Suppress("UNCHECKED_CAST")
-                val carDevs = s[6] as List<Pair<String, String>>
                 val nowV = sig[0] as LocalDateTime
-                val hp = sig[1] as Boolean
-                val carModeOn = sig[2] as Boolean
+                @Suppress("UNCHECKED_CAST")
+                val outs = sig[1] as List<AudioOut>
+                val car = sig[2] as Boolean
                 @Suppress("UNCHECKED_CAST")
                 val bt = sig[3] as Set<String>
                 val loc = sig[4] as LatLng?
-                val carAddrs = carDevs.map { it.first }.toSet()
-                val car = carModeOn || bt.any { it in carAddrs }
+                // Picked space BT devices don't count as headphones.
+                val excluded = spaces.flatMap { sp ->
+                    sp.btDevices.map { it.normalizedAddress }
+                }.toSet()
+                val hp = headphonesActive(outs, bt, excluded)
                 val signalsChanged = sig.toList() != lastSignals
                 lastSignals = sig.toList()
                 Triple(spaces, resolveSpaces(
                     spaces,
-                    SpaceSignals(nowV, hp, car, loc, home, work),
+                    SpaceSignals(nowV, hp, car, bt, loc, home, work),
                     auto, fallback, manual,
                 ), signalsChanged)
             }.collect { (spaces, res, signalsChanged) ->

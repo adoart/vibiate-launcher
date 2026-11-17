@@ -148,6 +148,15 @@ private fun reasonText(space: SpaceDef?, resolution: SpaceResolution?): String {
     if (SpaceReason.CAR in resolution.reasons) {
         parts += stringResource(R.string.space_reason_driving)
     }
+    if (SpaceReason.BLUETOOTH in resolution.reasons) {
+        parts += if (space.btDevices.size == 1) {
+            stringResource(
+                R.string.space_reason_bt_one, space.btDevices.first().name,
+            )
+        } else {
+            stringResource(R.string.space_reason_bt)
+        }
+    }
     return parts.filter { it.isNotBlank() }.joinToString(" · ")
 }
 

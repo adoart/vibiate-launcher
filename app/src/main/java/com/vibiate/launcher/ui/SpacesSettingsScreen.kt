@@ -79,6 +79,7 @@ import androidx.core.content.ContextCompat
 import com.vibiate.launcher.R
 import com.vibiate.launcher.data.AppEntry
 import com.vibiate.launcher.data.AppRepository
+import com.vibiate.launcher.data.BtDevice
 import com.vibiate.launcher.data.PlaceTrigger
 import com.vibiate.launcher.data.LatLng
 import com.vibiate.launcher.data.SavedPlace
@@ -156,16 +157,13 @@ fun SpacesSettingsScreen(
     )
     val placeHome by settings.placeHome.collectAsState(initial = null)
     val placeWork by settings.placeWork.collectAsState(initial = null)
-    val carDevices by settings.carBtDevices.collectAsState(
-        initial = emptyList(),
-    )
     val resolution by engine.resolution.collectAsState()
     val apps by appRepository.apps.collectAsState()
 
     var editingId by remember { mutableStateOf(initialSpaceId) }
     var showFallbackDialog by remember { mutableStateOf(false) }
     var placeDialog by remember { mutableStateOf<String?>(null) } // "home"/"work"
-    var showCarDialog by remember { mutableStateOf(false) }
+    var btPickSpace by remember { mutableStateOf<Int?>(null) }
     var showDeleteConfirm by remember { mutableStateOf<Int?>(null) }
     var showAppsDialog by remember { mutableStateOf(false) }
     var renameSpace by remember { mutableStateOf<Int?>(null) }
@@ -197,7 +195,7 @@ fun SpacesSettingsScreen(
     // Permission launchers (location / Bluetooth) requested from dialogs.
     var pendingPlaceAfterGrant by remember { mutableStateOf(false) }
     var placeFill by remember { mutableStateOf<LatLng?>(null) }
-    var pendingCarAfterGrant by remember { mutableStateOf(false) }
+    var pendingBtAfterGrant by remember { mutableStateOf(false) }
     val permLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) {
@@ -208,9 +206,9 @@ fun SpacesSettingsScreen(
                 placeFill = engine.currentLocation()
             }
         }
-        if (pendingCarAfterGrant) {
-            pendingCarAfterGrant = false
-            if (hasBtPermission(context)) showCarDialog = true
+        if (pendingBtAfterGrant) {
+            pendingBtAfterGrant = false
+            if (hasBtPermission(context)) btPickSpace = editingId
         }
     }
 
@@ -280,42 +278,6 @@ fun SpacesSettingsScreen(
                         stringResource(R.string.spaces_place_work),
                         value = placeSummary(placeWork),
                         onClick = { placeDialog = "work" },
-                    )
-                }
-
-                item { SectionBand(stringResource(R.string.spaces_car)) }
-                item {
-                    val v = when {
-                        !hasBtPermission(context) -> stringResource(R.string.spaces_car_perm)
-                        else -> pluralStringResource(R.plurals.spaces_car_selected, carDevices.size, carDevices.size)
-                    }
-                    AviateRow(
-                        Icons.Filled.Bluetooth,
-                        stringResource(R.string.spaces_car_bt),
-                        value = v,
-                        onClick = {
-                            if (hasBtPermission(context)) {
-                                showCarDialog = true
-                            } else {
-                                pendingCarAfterGrant = true
-                                permLauncher.launch(
-                                    arrayOf(
-                                        Manifest.permission.BLUETOOTH_CONNECT,
-                                    ),
-                                )
-                            }
-                        },
-                    )
-                }
-                item {
-                    Text(
-                        stringResource(R.string.spaces_car_hint),
-                        color = Color(0xFF999999),
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(
-                            horizontal = 16.dp,
-                            vertical = 8.dp,
-                        ),
                     )
                 }
 
@@ -585,19 +547,36 @@ fun SpacesSettingsScreen(
                     ) {
                         Switch(
                             checked = space.car,
-                            onCheckedChange = { on ->
-                                if (on && !hasBtPermission(context)) {
-                                    pendingCarAfterGrant = true
-                                    permLauncher.launch(
-                                        arrayOf(
-                                            Manifest.permission.BLUETOOTH_CONNECT,
-                                        ),
-                                    )
-                                }
-                                update(space.copy(car = on))
-                            },
+                            onCheckedChange = { update(space.copy(car = it)) },
                         )
                     }
+                }
+                item {
+                    AviateRow(
+                        Icons.Filled.Bluetooth,
+                        stringResource(R.string.spaces_bt_device),
+                        subtitle = stringResource(R.string.spaces_bt_hint),
+                        value = when (space.btDevices.size) {
+                            0 -> stringResource(R.string.spaces_none)
+                            1 -> space.btDevices.first().name
+                            else -> pluralStringResource(
+                                R.plurals.spaces_bt_selected,
+                                space.btDevices.size, space.btDevices.size,
+                            )
+                        },
+                        onClick = {
+                            if (hasBtPermission(context)) {
+                                btPickSpace = space.id
+                            } else {
+                                pendingBtAfterGrant = true
+                                permLauncher.launch(
+                                    arrayOf(
+                                        Manifest.permission.BLUETOOTH_CONNECT,
+                                    ),
+                                )
+                            }
+                        },
+                    )
                 }
 
                 item { SectionBand(stringResource(R.string.spaces_on_activate)) }
@@ -791,29 +770,40 @@ fun SpacesSettingsScreen(
         )
     }
 
-    if (showCarDialog) {
+    btPickSpace?.let { id ->
+        val space = list.firstOrNull { it.id == id } ?: return@let
         val bonded = remember { engine.bondedDevices() }
+        // Keep already-picked devices listed even if unpaired since.
+        val rows = (
+            bonded.map { (a, n) -> BtDevice(a.uppercase(), n) } +
+                space.btDevices
+            ).distinctBy { it.normalizedAddress }
         AlertDialog(
-            onDismissRequest = { showCarDialog = false },
-            title = { Text(stringResource(R.string.spaces_car_bt)) },
+            onDismissRequest = { btPickSpace = null },
+            title = { Text(stringResource(R.string.spaces_bt_device)) },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
-                    if (bonded.isEmpty()) Text(stringResource(R.string.spaces_no_bonded))
-                    bonded.forEach { (addr, name) ->
-                        val checked = carDevices.any { it.first == addr }
+                    if (rows.isEmpty()) {
+                        Text(stringResource(R.string.spaces_no_bonded))
+                    }
+                    rows.forEach { dev ->
+                        val addr = dev.normalizedAddress
+                        val checked = space.btDevices.any {
+                            it.normalizedAddress == addr
+                        }
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
                                     val next = if (checked) {
-                                        carDevices.filter { it.first != addr }
+                                        space.btDevices.filterNot {
+                                            it.normalizedAddress == addr
+                                        }
                                     } else {
-                                        carDevices + (addr to name)
+                                        space.btDevices + dev
                                     }
-                                    scope.launch {
-                                        settings.setCarBtDevices(next)
-                                    }
+                                    update(space.copy(btDevices = next))
                                 }
                                 .padding(vertical = 4.dp),
                         ) {
@@ -824,15 +814,17 @@ fun SpacesSettingsScreen(
                             )
                             Spacer(Modifier.width(8.dp))
                             Column {
-                                Text(name)
-                                Text(addr, fontSize = 12.sp, color = Color.Gray)
+                                Text(dev.name)
+                                Text(
+                                    addr, fontSize = 12.sp, color = Color.Gray,
+                                )
                             }
                         }
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showCarDialog = false }) {
+                TextButton(onClick = { btPickSpace = null }) {
                     Text(stringResource(R.string.done))
                 }
             },

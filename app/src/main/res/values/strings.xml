@@ -239,14 +239,10 @@
     <string name="spaces_place_work">Work</string>
     <string name="spaces_place_not_set">Not set</string>
     <string name="spaces_place_format">%1$.4f, %2$.4f · %3$d m</string>
-    <string name="spaces_car">Car</string>
-    <string name="spaces_car_bt">Car Bluetooth devices</string>
-    <plurals name="spaces_car_selected">
-        <item quantity="one">%d selected</item>
-        <item quantity="other">%d selected</item>
+    <plurals name="spaces_bt_selected">
+        <item quantity="one">%d device</item>
+        <item quantity="other">%d devices</item>
     </plurals>
-    <string name="spaces_car_perm">Permission needed</string>
-    <string name="spaces_car_hint">Android Auto / car mode also counts as driving.</string>
     <string name="spaces_list_title">Spaces</string>
     <string name="spaces_priority_hint">Higher spaces win when several match.</string>
     <string name="spaces_general">General</string>
@@ -270,7 +266,7 @@
     <string name="spaces_set_home_hint">Set Home in Places</string>
     <string name="spaces_set_work_hint">Set Work in Places</string>
     <string name="spaces_driving">Driving</string>
-    <string name="spaces_driving_hint">Car Bluetooth device or car mode</string>
+    <string name="spaces_driving_hint">Car mode or Android Auto</string>
     <string name="spaces_on_activate">When it activates</string>
     <string name="spaces_show_page">Show the Spaces page</string>
     <string name="spaces_open_app">Open an app</string>
@@ -309,5 +305,9 @@
     <string name="remove_from_category">Remove from %1$s</string>
     <string name="allow_rotation">Allow landscape (auto-rotate)</string>
     <string name="work_app">Work app</string>
+    <string name="spaces_bt_device">Bluetooth device</string>
+    <string name="spaces_bt_hint">Switch here when one connects. It won’t count as headphones.</string>
+    <string name="space_reason_bt">Bluetooth device connected</string>
+    <string name="space_reason_bt_one">Connected to %1$s</string>
 </resources>
 

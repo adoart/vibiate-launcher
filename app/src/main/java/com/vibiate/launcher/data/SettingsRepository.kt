@@ -446,19 +446,28 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
-    /** Chosen car Bluetooth devices as "address|name" lines. */
-    val carBtDevices: Flow<List<Pair<String, String>>> = store.data.map {
-        it[Keys.CAR_BT_DEVICES]?.split('\n')?.mapNotNull { line ->
-            val i = line.indexOf('|')
-            if (i <= 0) null else line.substring(0, i) to line.substring(i + 1)
-        } ?: emptyList()
-    }
-
-    suspend fun setCarBtDevices(devices: List<Pair<String, String>>) {
-        store.edit {
-            it[Keys.CAR_BT_DEVICES] = devices.joinToString("\n") { (a, n) ->
-                "$a|${n.replace('|', ' ').replace('\n', ' ')}"
+    /**
+     * One-time migration: the old global "Car Bluetooth devices" list moves
+     * onto every space with `car == true` as per-space [SpaceDef.btDevices].
+     */
+    suspend fun migrateCarBtDevices() {
+        store.edit { p ->
+            val raw = p[Keys.CAR_BT_DEVICES]
+            if (raw == null) return@edit
+            p.remove(Keys.CAR_BT_DEVICES)
+            if (raw.isBlank()) return@edit
+            val devices = raw.split('\n').mapNotNull { line ->
+                val i = line.indexOf('|')
+                if (i <= 0) null
+                else BtDevice(line.substring(0, i).uppercase(), line.substring(i + 1))
             }
+            val current = p[Keys.SPACES]?.split('\n')
+                ?.mapNotNull(SpaceDef::deserialize)
+                ?.takeIf { it.isNotEmpty() }
+                ?: defaultSpaceDefs()
+            p[Keys.SPACES] = com.vibiate.launcher.data
+                .migrateCarBtDevices(current, devices)
+                .joinToString("\n") { it.serialize() }
         }
     }
 

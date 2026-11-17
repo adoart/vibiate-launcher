@@ -20,10 +20,11 @@ class SpacesTest {
         now: LocalDateTime = mon,
         headphones: Boolean = false,
         car: Boolean = false,
+        bt: Set<String> = emptySet(),
         location: LatLng? = null,
         home: SavedPlace? = null,
         work: SavedPlace? = null,
-    ) = SpaceSignals(now, headphones, car, location, home, work)
+    ) = SpaceSignals(now, headphones, car, bt, location, home, work)
 
     // ---- TimeWindow ----
 
@@ -254,5 +255,149 @@ class SpacesTest {
             listOf("com.spotify/Main"),
             defaultSpaceApps(4, apps),
         )
+    }
+
+    // ---- Bluetooth device triggers ----
+
+    @Test
+    fun `bt devices serialize round trip and legacy strings`() {
+        val def = SpaceDef(
+            3, "Going", SpaceGlyph.CAR, car = true,
+            btDevices = listOf(
+                BtDevice("aa:bb:cc:dd:ee:ff", "Car, Radio=1|x"),
+                BtDevice("11:22:33:44:55:66", "Seat"),
+            ),
+        )
+        val back = SpaceDef.deserialize(def.serialize())!!
+        assertEquals("AA:BB:CC:DD:EE:FF", back.btDevices[0].address)
+        assertEquals("Car  Radio 1 x", back.btDevices[0].name)
+        assertEquals(2, back.btDevices.size)
+        // Old 14-field string -> empty list.
+        val old = SpaceDef(3, "Going", SpaceGlyph.CAR, car = true)
+            .serialize().substringBeforeLast('|')
+        assertTrue(
+            SpaceDef.deserialize(old)!!.btDevices.isEmpty(),
+        )
+    }
+
+    @Test
+    fun `bt device matching is case insensitive and all-mode aware`() {
+        val s = SpaceDef(
+            3, "Going", SpaceGlyph.CAR,
+            btDevices = listOf(BtDevice("AA:BB:CC:DD:EE:FF", "Car")),
+        )
+        assertTrue(s.matches(signals(bt = setOf("AA:BB:CC:DD:EE:FF"))))
+        assertFalse(s.matches(signals(bt = setOf("11:22:33:44:55:66"))))
+        assertTrue(
+            SpaceReason.BLUETOOTH in
+                s.matchReasons(signals(bt = setOf("AA:BB:CC:DD:EE:FF"))),
+        )
+        // ALL: time AND bluetooth both required.
+        val all = s.copy(
+            match = TriggerMatch.ALL,
+            time = TimeWindow(9 * 60, 18 * 60),
+        )
+        assertTrue(
+            all.matches(
+                signals(now = at(3, 10), bt = setOf("AA:BB:CC:DD:EE:FF")),
+            ),
+        )
+        // Time outside the window -> ALL fails even though BT matches.
+        assertFalse(
+            all.matches(
+                signals(now = at(3, 20), bt = setOf("AA:BB:CC:DD:EE:FF")),
+            ),
+        )
+    }
+
+    @Test
+    fun `headphonesActive excludes picked space devices`() {
+        val car = "AA:BB:CC:DD:EE:FF"
+        val excluded = setOf(car)
+        // Excluded BT out -> false.
+        assertFalse(
+            headphonesActive(
+                listOf(AudioOut(true, car)), setOf(car), excluded,
+            ),
+        )
+        // Wired always counts.
+        assertTrue(
+            headphonesActive(
+                listOf(AudioOut(false, ""), AudioOut(true, car)),
+                setOf(car), excluded,
+            ),
+        )
+        // Non-excluded BT out -> true.
+        assertTrue(
+            headphonesActive(
+                listOf(AudioOut(true, "11:22:33:44:55:66")),
+                setOf(car), excluded,
+            ),
+        )
+        // Blank address: false when everything connected is excluded.
+        assertFalse(
+            headphonesActive(
+                listOf(AudioOut(true, "")), setOf(car), excluded,
+            ),
+        )
+        // Blank address: true when nothing is connected.
+        assertTrue(
+            headphonesActive(
+                listOf(AudioOut(true, "")), emptySet(), excluded,
+            ),
+        )
+    }
+
+    @Test
+    fun `car device activates Going Somewhere not Listening`() {
+        val car = "AA:BB:CC:DD:EE:FF"
+        val spaces = defaultSpaces { "s$it" }.map {
+            if (it.id == 3) {
+                it.copy(btDevices = listOf(BtDevice(car, "Car")))
+            } else {
+                it
+            }
+        }
+        val hp = headphonesActive(
+            listOf(AudioOut(true, car)), setOf(car), setOf(car),
+        )
+        val r = resolveSpaces(
+            spaces, signals(headphones = hp, bt = setOf(car)),
+            true, 1, null,
+        )
+        assertEquals(3, r.spaceId)
+        assertTrue(SpaceReason.BLUETOOTH in r.reasons)
+        // Even when Listening is ordered above Going Somewhere, GS still
+        // wins because the car device is not a headphones signal anymore.
+        val reordered = listOf(spaces[1], spaces[0], spaces[2], spaces[3])
+        val r2 = resolveSpaces(
+            reordered, signals(headphones = hp, bt = setOf(car)),
+            true, 1, null,
+        )
+        assertEquals(3, r2.spaceId) // GS first in reordered list anyway
+        // Real headphones, no car -> Listening.
+        val r3 = resolveSpaces(
+            spaces,
+            signals(headphones = true, bt = setOf("11:22:33:44:55:66")),
+            true, 1, null,
+        )
+        assertEquals(4, r3.spaceId)
+    }
+
+    @Test
+    fun `migrateCarBtDevices adds to car spaces and dedupes`() {
+        val dev = BtDevice("AA:BB:CC:DD:EE:FF", "Car")
+        val spaces = listOf(
+            SpaceDef(3, "Going", SpaceGlyph.CAR, car = true),
+            SpaceDef(4, "Listen", SpaceGlyph.HEADPHONES, headphones = true),
+            SpaceDef(
+                9, "Car2", SpaceGlyph.CAR, car = true,
+                btDevices = listOf(dev),
+            ),
+        )
+        val out = migrateCarBtDevices(spaces, listOf(dev))
+        assertEquals(1, out[0].btDevices.size)
+        assertTrue(out[1].btDevices.isEmpty())
+        assertEquals(1, out[2].btDevices.size) // deduped
     }
 }
