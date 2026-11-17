@@ -7,6 +7,8 @@ import android.os.Build
 import android.provider.Settings as AndroidSettings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,12 +22,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Autorenew
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.Palette
@@ -45,6 +50,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -69,20 +75,26 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vibiate.launcher.BuildConfig
 import com.vibiate.launcher.R
+import com.vibiate.launcher.data.ACCENT_PRESETS
+import com.vibiate.launcher.data.AccentSource
 import com.vibiate.launcher.data.AppRepository
+import com.vibiate.launcher.data.DEFAULT_ACCENT
 import com.vibiate.launcher.data.DockRepository
 import com.vibiate.launcher.data.IconPackInfo
 import com.vibiate.launcher.data.IconPackManager
 import com.vibiate.launcher.data.SettingsRepository
 import com.vibiate.launcher.data.ThemeMode
+import com.vibiate.launcher.data.WallpaperAccent
 import com.vibiate.launcher.data.WallpaperRotator
+import com.vibiate.launcher.data.accentHue
+import com.vibiate.launcher.data.hueAccent
+import com.vibiate.launcher.data.onAccentColor
 import com.vibiate.launcher.data.WallpaperSchedule
 import com.vibiate.launcher.data.WallpaperScheduleMode
 import com.vibiate.launcher.data.WallpaperTarget
 import com.vibiate.launcher.data.WALLPAPER_INTERVAL_PRESETS
 import com.vibiate.launcher.ui.components.IconPacksDialog
 import com.vibiate.launcher.ui.components.RadioOption
-import com.vibiate.launcher.ui.theme.AviateBlue
 import com.vibiate.launcher.ui.theme.LocalIsDark
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -106,6 +118,7 @@ fun SettingsScreen(
     spaceEngine: com.vibiate.launcher.data.SpaceEngine,
     widgetController: com.vibiate.launcher.widget.WidgetController,
     wallpaperRotator: WallpaperRotator,
+    wallpaperAccent: WallpaperAccent,
     initialSpaceId: Int? = null,
     onBack: () -> Unit = {},
     onRestoreHomeWidgets: () -> Unit = {},
@@ -146,6 +159,14 @@ fun SettingsScreen(
 
     val themeMode by settings.themeMode.collectAsState(initial = ThemeMode.DARK)
     val allowRotation by settings.allowRotation.collectAsState(initial = false)
+    val accentSource by settings.accentSource.collectAsState(
+        initial = AccentSource.COLOR,
+    )
+    val accentColor by settings.accentColor.collectAsState(
+        initial = DEFAULT_ACCENT,
+    )
+    val wallpaperAccentColor by wallpaperAccent.accent.collectAsState()
+    var showAccentDialog by rememberSaveable { mutableStateOf(false) }
     val iconPackPkg by settings.iconPackPackage.collectAsState(initial = "")
     val iconPackFallbacks by settings.iconPackFallbacks.collectAsState(
         initial = emptyList()
@@ -208,18 +229,18 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp)
-                .background(AviateBlue),
+                .background(MaterialTheme.colorScheme.primary),
         ) {
             IconButton(onClick = onBack) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Back",
-                    tint = Color.White,
+                    tint = MaterialTheme.colorScheme.onPrimary,
                 )
             }
             Text(
                 text = "SETTINGS",
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onPrimary,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
             )
@@ -239,6 +260,34 @@ fun SettingsScreen(
                     }) {
                         RadioButton(selected = themeMode == mode, onClick = null)
                     }
+                }
+            }
+            item(key = "accent") {
+                val resolvedAccent = if (accentSource == AccentSource.WALLPAPER) {
+                    wallpaperAccentColor ?: accentColor
+                } else {
+                    accentColor
+                }
+                val presetIndex = ACCENT_PRESETS.indexOf(accentColor)
+                val accentLabel = when {
+                    accentSource == AccentSource.WALLPAPER ->
+                        stringResource(R.string.accent_match_wallpaper)
+                    presetIndex >= 0 -> stringResource(
+                        ACCENT_NAME_RES[presetIndex],
+                    )
+                    else -> stringResource(R.string.accent_custom)
+                }
+                AviateRow(
+                    Icons.Filled.ColorLens,
+                    stringResource(R.string.accent_color),
+                    value = accentLabel,
+                    onClick = { showAccentDialog = true },
+                ) {
+                    Box(
+                        Modifier
+                            .size(18.dp)
+                            .background(Color(resolvedAccent), CircleShape),
+                    )
                 }
             }
             item(key = "allow_rotation") {
@@ -431,6 +480,21 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+
+    if (showAccentDialog) {
+        AccentDialog(
+            source = accentSource,
+            color = accentColor,
+            wallpaperColor = wallpaperAccentColor,
+            onPick = { source, color ->
+                scope.launch {
+                    if (color != null) settings.setAccentColor(color)
+                    settings.setAccentSource(source)
+                }
+            },
+            onDone = { showAccentDialog = false },
+        )
     }
 
     if (showIconPackDialog) {
@@ -726,4 +790,124 @@ internal fun AviateRow(
         }
         Spacer(Modifier.fillMaxWidth().height(1.dp).background(dividerColor()))
     }
+}
+
+private val ACCENT_NAME_RES = intArrayOf(
+    R.string.accent_preset_0, R.string.accent_preset_1,
+    R.string.accent_preset_2, R.string.accent_preset_3,
+    R.string.accent_preset_4, R.string.accent_preset_5,
+    R.string.accent_preset_6, R.string.accent_preset_7,
+    R.string.accent_preset_8, R.string.accent_preset_9,
+    R.string.accent_preset_10, R.string.accent_preset_11,
+)
+
+/** Accent picker: match wallpaper, preset swatches, or a custom hue. */
+@Composable
+private fun AccentDialog(
+    source: AccentSource,
+    color: Int,
+    wallpaperColor: Int?,
+    onPick: (AccentSource, Int?) -> Unit,
+    onDone: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDone,
+        title = { Text(stringResource(R.string.accent_color)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                val wpSupported = Build.VERSION.SDK_INT >= 27
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(
+                            if (wpSupported) {
+                                Modifier.clickable {
+                                    onPick(AccentSource.WALLPAPER, null)
+                                }
+                            } else {
+                                Modifier
+                            },
+                        )
+                        .padding(vertical = 8.dp),
+                ) {
+                    RadioButton(
+                        selected = source == AccentSource.WALLPAPER,
+                        onClick = null,
+                        enabled = wpSupported,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.accent_match_wallpaper))
+                        if (!wpSupported) {
+                            Text(
+                                stringResource(R.string.accent_needs_api),
+                                fontSize = 12.sp,
+                                color = Color(0xFF999999),
+                            )
+                        }
+                    }
+                    Box(
+                        Modifier
+                            .size(28.dp)
+                            .background(
+                                Color(wallpaperColor ?: 0xFF9E9E9E.toInt()),
+                                CircleShape,
+                            ),
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                ACCENT_PRESETS.chunked(6).forEach { rowColors ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(vertical = 6.dp),
+                    ) {
+                        rowColors.forEach { c ->
+                            Box(
+                                Modifier
+                                    .size(36.dp)
+                                    .background(Color(c), CircleShape)
+                                    .clickable { onPick(AccentSource.COLOR, c) },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (source == AccentSource.COLOR && color == c) {
+                                    Icon(
+                                        Icons.Filled.Check,
+                                        contentDescription = null,
+                                        tint = Color(onAccentColor(c)),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                var hue by remember(color) {
+                    mutableStateOf(accentHue(color))
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.accent_custom))
+                    Spacer(Modifier.weight(1f))
+                    Box(
+                        Modifier
+                            .size(28.dp)
+                            .background(Color(hueAccent(hue)), CircleShape),
+                    )
+                }
+                Slider(
+                    value = hue,
+                    onValueChange = {
+                        hue = it
+                        onPick(AccentSource.COLOR, hueAccent(it))
+                    },
+                    valueRange = 0f..360f,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDone) {
+                Text(stringResource(R.string.done))
+            }
+        },
+    )
 }

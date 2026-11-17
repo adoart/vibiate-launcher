@@ -90,7 +90,6 @@ import com.vibiate.launcher.data.TimeWindow
 import com.vibiate.launcher.data.TriggerMatch
 import com.vibiate.launcher.data.spaceScreenId
 import com.vibiate.launcher.ui.components.RadioOption
-import com.vibiate.launcher.ui.theme.AviateBlue
 import com.vibiate.launcher.widget.WidgetController
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -218,7 +217,7 @@ fun SpacesSettingsScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp)
-                .background(AviateBlue),
+                .background(MaterialTheme.colorScheme.primary),
         ) {
             IconButton(
                 onClick = {
@@ -228,12 +227,12 @@ fun SpacesSettingsScreen(
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Back",
-                    tint = Color.White,
+                    tint = MaterialTheme.colorScheme.onPrimary,
                 )
             }
             Text(
                 text = editing?.name?.uppercase() ?: stringResource(R.string.spaces_list_title).uppercase(),
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onPrimary,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
             )

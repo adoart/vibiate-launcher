@@ -8,18 +8,21 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
 import com.vibiate.launcher.R
+import com.vibiate.launcher.data.onAccentColor
 import com.vibiate.launcher.data.LauncherFont
 import com.vibiate.launcher.data.ThemeMode
 
-private val DarkColors = darkColorScheme(
-    primary = AviateBlue,
-    onPrimary = Color.White,
-    secondary = AviateBlue,
+private fun darkColors(accent: Color, onAccent: Color) = darkColorScheme(
+    primary = accent,
+    onPrimary = onAccent,
+    secondary = accent,
     background = DarkBackground,
     onBackground = DarkOnSurface,
     surface = DarkSurface,
@@ -29,10 +32,10 @@ private val DarkColors = darkColorScheme(
     outline = Color(0x33FFFFFF),
 )
 
-private val LightColors = lightColorScheme(
-    primary = AviateBlue,
-    onPrimary = LightSurface,
-    secondary = AviateBlue,
+private fun lightColors(accent: Color, onAccent: Color) = lightColorScheme(
+    primary = accent,
+    onPrimary = onAccent,
+    secondary = accent,
     background = LightBackground,
     onBackground = LightOnSurface,
     surface = LightSurface,
@@ -93,6 +96,7 @@ val LocalAviateColors = compositionLocalOf { AviateDarkOverlay }
 fun VibiateTheme(
     mode: ThemeMode,
     font: LauncherFont = LauncherFont.AVIATE,
+    accent: Color = AviateBlue,
     content: @Composable () -> Unit,
 ) {
     val dark = when (mode) {
@@ -100,13 +104,18 @@ fun VibiateTheme(
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }
+    val onAccent = Color(onAccentColor(accent.toArgb()))
     CompositionLocalProvider(
         LocalIsDark provides dark,
         LocalAviateColors provides if (dark) AviateDarkOverlay else AviateLightOverlay,
     ) {
         MaterialTheme(
-            colorScheme = if (dark) DarkColors else LightColors,
-            typography = typographyWith(font.toFontFamily()),
+            // Remembered: a new scheme/typography instance would recompose
+            // everything that reads the theme on every LauncherRoot pass.
+            colorScheme = remember(dark, accent) {
+                if (dark) darkColors(accent, onAccent) else lightColors(accent, onAccent)
+            },
+            typography = remember(font) { typographyWith(font.toFontFamily()) },
             content = content,
         )
     }

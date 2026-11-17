@@ -56,6 +56,8 @@ class SettingsRepository(private val context: Context) {
         val CAR_BT_DEVICES = stringPreferencesKey("car_bt_devices") // newline "address|name"
         val SPACES_CONTENT_SEEDED = booleanPreferencesKey("spaces_content_seeded")
         val ALLOW_ROTATION = booleanPreferencesKey("allow_rotation")
+        val ACCENT_SOURCE = stringPreferencesKey("accent_source")
+        val ACCENT_COLOR = intPreferencesKey("accent_color")
     }
 
     private val store get() = context.vibiateDataStore
@@ -390,6 +392,26 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setAllowRotation(allow: Boolean) {
         store.edit { it[Keys.ALLOW_ROTATION] = allow }
+    }
+
+    /** Where the launcher accent comes from (fixed colour vs wallpaper). */
+    val accentSource: Flow<AccentSource> = store.data.map {
+        runCatching {
+            AccentSource.valueOf(it[Keys.ACCENT_SOURCE] ?: "")
+        }.getOrDefault(AccentSource.COLOR)
+    }
+
+    suspend fun setAccentSource(source: AccentSource) {
+        store.edit { it[Keys.ACCENT_SOURCE] = source.name }
+    }
+
+    /** User-picked accent colour (ARGB); fallback for WALLPAPER source. */
+    val accentColor: Flow<Int> = store.data.map {
+        it[Keys.ACCENT_COLOR] ?: DEFAULT_ACCENT
+    }
+
+    suspend fun setAccentColor(color: Int) {
+        store.edit { it[Keys.ACCENT_COLOR] = color }
     }
 
     /** Apps hidden from every Collections panel (kept in A–Z, dock, etc.). */

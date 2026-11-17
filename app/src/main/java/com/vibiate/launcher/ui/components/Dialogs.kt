@@ -23,6 +23,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -58,7 +59,6 @@ import com.vibiate.launcher.ui.dividerColor
 import com.vibiate.launcher.ui.rowColor
 import com.vibiate.launcher.ui.rowTextColor
 import com.vibiate.launcher.ui.sectionBandColor
-import com.vibiate.launcher.ui.theme.AviateBlue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -253,7 +253,7 @@ internal fun AviateTopBar(title: String, onBack: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .height(56.dp)
-            .background(AviateBlue),
+            .background(MaterialTheme.colorScheme.primary),
     ) {
         IconButton(onClick = onBack) {
             Icon(
@@ -418,7 +418,7 @@ private fun FallbackRow(
                 Text(
                     text = position.toString(),
                     fontSize = 13.sp,
-                    color = AviateBlue,
+                    color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold,
                 )
             }

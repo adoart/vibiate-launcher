@@ -73,8 +73,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.vibiate.launcher.R
+import com.vibiate.launcher.data.AccentSource
 import com.vibiate.launcher.data.AppEntry
 import com.vibiate.launcher.data.AppRepository
+import com.vibiate.launcher.data.DEFAULT_ACCENT
 import com.vibiate.launcher.data.DockRepository
 import com.vibiate.launcher.data.dockRemove
 import com.vibiate.launcher.data.HOME_SCREEN_ID
@@ -86,6 +88,7 @@ import com.vibiate.launcher.data.SpaceEngine
 import com.vibiate.launcher.data.SpaceReason
 import com.vibiate.launcher.data.spaceScreenId
 import com.vibiate.launcher.data.ThemeMode
+import com.vibiate.launcher.data.WallpaperAccent
 import com.vibiate.launcher.data.WallpaperRotator
 import com.vibiate.launcher.ui.components.BadgedIconImage
 import com.vibiate.launcher.ui.components.LauncherDock
@@ -120,6 +123,7 @@ fun LauncherRoot(
     widgetController: WidgetController,
     spaceEngine: SpaceEngine,
     wallpaperRotator: WallpaperRotator,
+    wallpaperAccent: WallpaperAccent,
     dockRepository: DockRepository,
     /** Emits when HOME is pressed while the launcher is in front. */
     homeEvents: Flow<Unit>,
@@ -136,6 +140,13 @@ fun LauncherRoot(
         initial = SettingsRepository.DEFAULT_GRID_SIZE
     )
     val fontFamily by settings.fontFamily.collectAsState(initial = LauncherFont.AVIATE)
+    val accentSource by settings.accentSource.collectAsState(
+        initial = AccentSource.COLOR,
+    )
+    val accentColor by settings.accentColor.collectAsState(
+        initial = DEFAULT_ACCENT,
+    )
+    val wpAccent by wallpaperAccent.accent.collectAsState()
 
     val iconPackFallbacks by settings.iconPackFallbacks.collectAsState(
         initial = emptyList()
@@ -304,7 +315,15 @@ fun LauncherRoot(
         }
     }
 
-    VibiateTheme(themeMode, font = fontFamily) {
+    val accent = Color(
+        if (accentSource == AccentSource.WALLPAPER) {
+            wpAccent ?: accentColor
+        } else {
+            accentColor
+        },
+    )
+
+    VibiateTheme(themeMode, font = fontFamily, accent = accent) {
         CompositionLocalProvider(LocalDragDrop provides drag) {
         val aviate = LocalAviateColors.current
         // Backdrop intensity: 0 on Home/Widgets/custom spaces, full on
@@ -462,6 +481,7 @@ fun LauncherRoot(
                                 spaceEngine = spaceEngine,
                                 widgetController = widgetController,
                                 wallpaperRotator = wallpaperRotator,
+                                wallpaperAccent = wallpaperAccent,
                                 initialSpaceId = settingsSpaceId,
                                 onBack = {
                                     settingsSpaceId = null

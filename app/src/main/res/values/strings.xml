@@ -357,5 +357,21 @@
     <string name="wp_set_now">Set as wallpaper now</string>
     <string name="wp_save">Save</string>
     <string name="wp_set_toast">Wallpaper set</string>
+    <string name="accent_color">Accent color</string>
+    <string name="accent_match_wallpaper">Match wallpaper</string>
+    <string name="accent_needs_api">Needs Android 8.1 or newer</string>
+    <string name="accent_custom">Custom</string>
+    <string name="accent_preset_0">Aviate blue</string>
+    <string name="accent_preset_1">Aviate orange</string>
+    <string name="accent_preset_2">Teal</string>
+    <string name="accent_preset_3">Green</string>
+    <string name="accent_preset_4">Lime</string>
+    <string name="accent_preset_5">Amber</string>
+    <string name="accent_preset_6">Deep orange</string>
+    <string name="accent_preset_7">Red</string>
+    <string name="accent_preset_8">Pink</string>
+    <string name="accent_preset_9">Purple</string>
+    <string name="accent_preset_10">Indigo</string>
+    <string name="accent_preset_11">Blue grey</string>
 </resources>
 

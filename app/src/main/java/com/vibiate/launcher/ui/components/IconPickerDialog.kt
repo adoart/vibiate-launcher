@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -53,7 +54,6 @@ import com.vibiate.launcher.data.SettingsRepository
 import com.vibiate.launcher.ui.rowColor
 import com.vibiate.launcher.ui.rowTextColor
 import com.vibiate.launcher.ui.sectionBandColor
-import com.vibiate.launcher.ui.theme.AviateBlue
 import java.util.Calendar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -201,7 +201,11 @@ fun IconPickerDialog(
                             modifier = Modifier
                                 .padding(end = 8.dp)
                                 .background(
-                                    if (selected) AviateBlue else rowColor(),
+                                    if (selected) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        rowColor()
+                                    },
                                     RoundedCornerShape(16.dp),
                                 )
                                 .clickable { selectedPkg = pack.packageName }

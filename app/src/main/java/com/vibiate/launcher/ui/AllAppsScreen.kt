@@ -46,7 +46,6 @@ import com.vibiate.launcher.ui.components.AviateSearchBar
 import com.vibiate.launcher.ui.components.IconPickerDialog
 import com.vibiate.launcher.ui.components.openAppDetails
 import com.vibiate.launcher.ui.drag.DragPayload
-import com.vibiate.launcher.ui.theme.AviateBlue
 import com.vibiate.launcher.ui.theme.LocalAviateColors
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
@@ -119,7 +118,7 @@ fun AllAppsScreen(
                 Text(
                     text = if (ascending) "A→Z" else "Z→A",
                     fontSize = 13.sp,
-                    color = AviateBlue,
+                    color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
                         .clickable { ascending = !ascending }
                         .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -259,7 +258,7 @@ private fun LetterGroupRow(
                     fontSize = 60.sp,
                     fontWeight = FontWeight.Thin,
                     fontFamily = FontFamily.Default,
-                    color = AviateBlue,
+                    color = MaterialTheme.colorScheme.primary,
                 )
             }
             group.apps.take(3).forEach { app ->

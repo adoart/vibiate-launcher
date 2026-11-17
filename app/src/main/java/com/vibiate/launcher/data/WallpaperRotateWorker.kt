@@ -68,6 +68,10 @@ class WallpaperRotateWorker(
             bmp.recycle()
             if (ok) {
                 settings.setWallpaperCurrent(img.uri)
+                // Keep the wallpaper-derived accent in sync even if the
+                // colours-changed listener is slow to fire.
+                (applicationContext as? com.vibiate.launcher.VibiateApplication)
+                    ?.wallpaperAccent?.refresh()
                 return
             }
         }

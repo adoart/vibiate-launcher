@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -73,7 +74,6 @@ import com.vibiate.launcher.data.addWallpaperImages
 import com.vibiate.launcher.data.coverCrop
 import com.vibiate.launcher.data.fitCropToAspect
 import com.vibiate.launcher.data.moveItem
-import com.vibiate.launcher.ui.theme.AviateBlue
 import kotlinx.coroutines.launch
 
 /** Manager for the rotation list: reorder, remove, crop-edit, add images. */
@@ -166,18 +166,18 @@ fun WallpaperImagesScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp)
-                .background(AviateBlue),
+                .background(MaterialTheme.colorScheme.primary),
         ) {
             IconButton(onClick = onBack) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Back",
-                    tint = Color.White,
+                    tint = MaterialTheme.colorScheme.onPrimary,
                 )
             }
             Text(
                 text = stringResource(R.string.wp_manager_title),
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onPrimary,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
             )
@@ -421,7 +421,7 @@ private fun WallpaperImageTile(
                     .align(Alignment.BottomEnd)
                     .padding(4.dp)
                     .background(
-                        AviateBlue.copy(alpha = 0.85f),
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
                         RoundedCornerShape(4.dp),
                     )
                     .padding(horizontal = 4.dp, vertical = 2.dp),

@@ -143,6 +143,7 @@ class MainActivity : ComponentActivity() {
                 widgetController = app.widgetController,
                 spaceEngine = app.spaceEngine,
                 wallpaperRotator = app.wallpaperRotator,
+                wallpaperAccent = app.wallpaperAccent,
                 dockRepository = app.dockRepository,
                 homeEvents = homeEvents,
                 onAddWidget = ::addWidgetFromPicker,
@@ -155,6 +156,7 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         // Catch up on missed wallpaper rotations / re-arm the alarm.
         lifecycleScope.launch { app.wallpaperRotator.onLauncherStarted() }
+        app.wallpaperAccent.refresh()
     }
 
     // singleTask: pressing HOME with the launcher in front re-delivers the
