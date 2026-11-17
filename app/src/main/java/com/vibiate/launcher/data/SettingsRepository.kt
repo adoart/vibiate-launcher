@@ -24,8 +24,15 @@ class SettingsRepository(private val context: Context) {
         val ICON_MASK_UNTHEMED = booleanPreferencesKey("icon_mask_unthemed")
         val ICON_OVERRIDES = stringPreferencesKey("icon_overrides") // newline-joined "key=pkg|drawable" / "key=@original"
         val WP_ENABLED = booleanPreferencesKey("wallpaper_enabled")
+        val WP_IMAGES = stringPreferencesKey("wallpaper_images") // serialized WallpaperImage list
+        val WP_CURRENT = stringPreferencesKey("wallpaper_current") // uri now showing
+        val WP_SCHEDULE = stringPreferencesKey("wallpaper_schedule") // WallpaperSchedule.serialize()
+        val WP_TARGET = stringPreferencesKey("wallpaper_target") // WallpaperTarget.name
+        val WP_SHUFFLE = booleanPreferencesKey("wallpaper_shuffle")
+        val WP_NEXT_DUE = longPreferencesKey("wallpaper_next_due") // epoch ms
+        // Legacy keys kept for read-back migration only (removed on write).
         val WP_INTERVAL = longPreferencesKey("wallpaper_interval_minutes")
-        val WP_URIS = stringPreferencesKey("wallpaper_uris") // newline-joined, ordered
+        val WP_URIS = stringPreferencesKey("wallpaper_uris")
         val WP_INDEX = intPreferencesKey("wallpaper_index")
         val WIDGETS = stringPreferencesKey("widgets") // newline-joined WidgetEntry.serialize()
         val SHORTCUTS = stringPreferencesKey("page_shortcuts") // newline-joined PageShortcut.serialize()
@@ -140,28 +147,75 @@ class SettingsRepository(private val context: Context) {
         store.edit { it[Keys.WP_ENABLED] = enabled }
     }
 
-    val wallpaperIntervalMinutes: Flow<Long> =
-        store.data.map { it[Keys.WP_INTERVAL] ?: WallpaperInterval.H24.minutes }
-
-    suspend fun setWallpaperInterval(minutes: Long) {
-        store.edit { it[Keys.WP_INTERVAL] = minutes }
+    /** Ordered rotation list. Falls back to the legacy uri list (no crops). */
+    val wallpaperImages: Flow<List<WallpaperImage>> = store.data.map { prefs ->
+        prefs[Keys.WP_IMAGES]?.let { deserializeWallpaperImages(it) }
+            ?: prefs[Keys.WP_URIS]?.split('\n')
+                ?.filter { s -> s.isNotBlank() }
+                ?.map { WallpaperImage(it) }
+            ?: emptyList()
     }
 
-    val wallpaperUris: Flow<List<String>> = store.data.map {
-        it[Keys.WP_URIS]?.split('\n')?.filter { s -> s.isNotBlank() } ?: emptyList()
-    }
-
-    suspend fun setWallpaperUris(uris: List<String>) {
+    suspend fun setWallpaperImages(images: List<WallpaperImage>) {
         store.edit {
-            it[Keys.WP_URIS] = uris.joinToString("\n")
-            it[Keys.WP_INDEX] = 0
+            it[Keys.WP_IMAGES] = serializeWallpaperImages(images)
+            it.remove(Keys.WP_URIS)
+            it.remove(Keys.WP_INDEX)
         }
     }
 
-    val wallpaperIndex: Flow<Int> = store.data.map { it[Keys.WP_INDEX] ?: 0 }
+    val wallpaperCurrent: Flow<String?> = store.data.map { it[Keys.WP_CURRENT] }
 
-    suspend fun setWallpaperIndex(index: Int) {
-        store.edit { it[Keys.WP_INDEX] = index }
+    suspend fun setWallpaperCurrent(uri: String?) {
+        store.edit {
+            if (uri == null) it.remove(Keys.WP_CURRENT) else it[Keys.WP_CURRENT] = uri
+        }
+    }
+
+    /** Falls back to INTERVAL with the legacy interval snapped to a preset. */
+    val wallpaperSchedule: Flow<WallpaperSchedule> = store.data.map { prefs ->
+        prefs[Keys.WP_SCHEDULE]?.let { WallpaperSchedule.deserialize(it) }
+            ?: prefs[Keys.WP_INTERVAL]?.let { old ->
+                WallpaperSchedule(
+                    intervalMinutes = nearestIntervalPreset(old),
+                    startMinute = 0,
+                    anchorEpochDay = java.time.LocalDate.now().toEpochDay(),
+                )
+            }
+            ?: WallpaperSchedule()
+    }
+
+    suspend fun setWallpaperSchedule(schedule: WallpaperSchedule) {
+        store.edit {
+            it[Keys.WP_SCHEDULE] = schedule.serialize()
+            it.remove(Keys.WP_INTERVAL)
+        }
+    }
+
+    val wallpaperTarget: Flow<WallpaperTarget> = store.data.map {
+        it[Keys.WP_TARGET]?.let { n ->
+            runCatching { WallpaperTarget.valueOf(n) }.getOrNull()
+        } ?: WallpaperTarget.BOTH
+    }
+
+    suspend fun setWallpaperTarget(target: WallpaperTarget) {
+        store.edit { it[Keys.WP_TARGET] = target.name }
+    }
+
+    val wallpaperShuffle: Flow<Boolean> =
+        store.data.map { it[Keys.WP_SHUFFLE] ?: false }
+
+    suspend fun setWallpaperShuffle(shuffle: Boolean) {
+        store.edit { it[Keys.WP_SHUFFLE] = shuffle }
+    }
+
+    val wallpaperNextDue: Flow<Long?> = store.data.map { it[Keys.WP_NEXT_DUE] }
+
+    suspend fun setWallpaperNextDue(epochMs: Long?) {
+        store.edit {
+            if (epochMs == null) it.remove(Keys.WP_NEXT_DUE)
+            else it[Keys.WP_NEXT_DUE] = epochMs
+        }
     }
 
     // ---- Widgets ----

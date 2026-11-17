@@ -151,6 +151,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        // Catch up on missed wallpaper rotations / re-arm the alarm.
+        lifecycleScope.launch { app.wallpaperRotator.onLauncherStarted() }
+    }
+
     // singleTask: pressing HOME with the launcher in front re-delivers the
     // home intent here instead of recreating the activity.
     override fun onNewIntent(intent: Intent) {

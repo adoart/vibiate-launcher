@@ -1,9 +1,10 @@
 package com.vibiate.launcher.ui
 
+import android.app.AlarmManager
+import android.content.Context
 import android.content.Intent
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
+import android.os.Build
+import android.provider.Settings as AndroidSettings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -18,9 +19,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Autorenew
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.Palette
@@ -30,10 +35,12 @@ import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -41,6 +48,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -67,8 +75,11 @@ import com.vibiate.launcher.data.IconPackInfo
 import com.vibiate.launcher.data.IconPackManager
 import com.vibiate.launcher.data.SettingsRepository
 import com.vibiate.launcher.data.ThemeMode
-import com.vibiate.launcher.data.WallpaperInterval
 import com.vibiate.launcher.data.WallpaperRotator
+import com.vibiate.launcher.data.WallpaperSchedule
+import com.vibiate.launcher.data.WallpaperScheduleMode
+import com.vibiate.launcher.data.WallpaperTarget
+import com.vibiate.launcher.data.WALLPAPER_INTERVAL_PRESETS
 import com.vibiate.launcher.ui.components.IconPacksDialog
 import com.vibiate.launcher.ui.components.RadioOption
 import com.vibiate.launcher.ui.theme.AviateBlue
@@ -121,6 +132,18 @@ fun SettingsScreen(
         return
     }
 
+    // Wallpaper images manager sub-page, same pattern as Spaces.
+    var showImages by rememberSaveable { mutableStateOf(false) }
+    if (showImages) {
+        androidx.activity.compose.BackHandler { showImages = false }
+        WallpaperImagesScreen(
+            settings = settings,
+            wallpaperRotator = wallpaperRotator,
+            onBack = { showImages = false },
+        )
+        return
+    }
+
     val themeMode by settings.themeMode.collectAsState(initial = ThemeMode.DARK)
     val allowRotation by settings.allowRotation.collectAsState(initial = false)
     val iconPackPkg by settings.iconPackPackage.collectAsState(initial = "")
@@ -128,30 +151,53 @@ fun SettingsScreen(
         initial = emptyList()
     )
     val wpEnabled by settings.wallpaperEnabled.collectAsState(initial = false)
-    val wpInterval by settings.wallpaperIntervalMinutes.collectAsState(initial = WallpaperInterval.H24.minutes)
-    val wpUris by settings.wallpaperUris.collectAsState(initial = emptyList())
+    val wpImages by settings.wallpaperImages.collectAsState(initial = emptyList())
+    val wpSchedule by settings.wallpaperSchedule.collectAsState(
+        initial = WallpaperSchedule()
+    )
+    val wpTarget by settings.wallpaperTarget.collectAsState(
+        initial = WallpaperTarget.BOTH
+    )
+    val wpShuffle by settings.wallpaperShuffle.collectAsState(initial = false)
 
     var showIconPackDialog by remember { mutableStateOf(false) }
-    var showIntervalDialog by remember { mutableStateOf(false) }
+    var showScheduleDialog by remember { mutableStateOf(false) }
+    var showTargetDialog by remember { mutableStateOf(false) }
+    var pickStartTime by remember { mutableStateOf(false) }
+    var pickExtraTime by remember { mutableStateOf(false) }
     val iconPacks by produceState<List<IconPackInfo>>(initialValue = emptyList()) {
         value = withContext(Dispatchers.Default) { iconPackManager.installedPacks() }
     }
 
-    val pickImages = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickMultipleVisualMedia()
-    ) { uris ->
-        if (!uris.isNullOrEmpty()) {
-            uris.forEach { uri ->
-                runCatching {
-                    context.contentResolver.takePersistableUriPermission(
-                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    )
+    // Exact-alarm capability (API 31+); re-read + re-arm on resume because the
+    // user can grant it in system settings.
+    val alarmManager = remember {
+        context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+    }
+    fun canExactAlarms() = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+        alarmManager.canScheduleExactAlarms()
+    var exactAlarms by remember { mutableStateOf(canExactAlarms()) }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                val now = canExactAlarms()
+                if (now != exactAlarms) {
+                    exactAlarms = now
+                    scope.launch { wallpaperRotator.reschedule() }
                 }
             }
-            scope.launch {
-                settings.setWallpaperUris(uris.map { it.toString() })
-                wallpaperRotator.reschedule()
-            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    fun fmtTime(m: Int) = String.format("%02d:%02d", m / 60, m % 60)
+
+    fun updateSchedule(ns: WallpaperSchedule) {
+        scope.launch {
+            settings.setWallpaperSchedule(ns)
+            wallpaperRotator.reschedule()
         }
     }
 
@@ -222,9 +268,12 @@ fun SettingsScreen(
                     onClick = { showIconPackDialog = true })
             }
 
-            item { SectionBand("Wallpaper rotation") }
+            item { SectionBand(stringResource(R.string.wp_section)) }
             item {
-                AviateRow(Icons.Filled.Wallpaper, "Enabled") {
+                AviateRow(
+                    Icons.Filled.Wallpaper,
+                    stringResource(R.string.wp_enabled),
+                ) {
                     Switch(
                         checked = wpEnabled,
                         onCheckedChange = { on ->
@@ -238,27 +287,85 @@ fun SettingsScreen(
             }
             item {
                 AviateRow(
-                    Icons.Filled.Schedule,
-                    "Interval",
-                    value = WallpaperInterval.fromMinutes(wpInterval).label,
-                    onClick = { showIntervalDialog = true },
+                    Icons.Filled.PhotoLibrary,
+                    stringResource(R.string.wp_images),
+                    value = if (wpImages.isEmpty()) {
+                        stringResource(R.string.wp_images_none)
+                    } else {
+                        androidx.compose.ui.res.pluralStringResource(
+                            R.plurals.wp_images_count,
+                            wpImages.size,
+                            wpImages.size,
+                        )
+                    },
+                    onClick = { showImages = true },
                 )
             }
             item {
                 AviateRow(
-                    Icons.Filled.PhotoLibrary,
-                    "Images",
-                    value = if (wpUris.isEmpty()) "None selected" else "${wpUris.size} selected",
-                    onClick = {
-                        pickImages.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
-                    },
+                    Icons.Filled.Schedule,
+                    stringResource(R.string.wp_schedule),
+                    value = wallpaperScheduleSummary(wpSchedule),
+                    onClick = { showScheduleDialog = true },
+                )
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                item {
+                    AviateRow(
+                        Icons.Filled.Alarm,
+                        stringResource(R.string.wp_exact_timing),
+                        value = stringResource(
+                            if (exactAlarms) R.string.wp_exact_on
+                            else R.string.wp_exact_off
+                        ),
+                        onClick = {
+                            if (!exactAlarms) {
+                                context.startActivity(
+                                    Intent(
+                                        AndroidSettings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                                        android.net.Uri.parse(
+                                            "package:${context.packageName}"
+                                        ),
+                                    ),
+                                )
+                            }
+                        },
+                    )
+                }
+            }
+            item {
+                AviateRow(
+                    Icons.Filled.Wallpaper,
+                    stringResource(R.string.wp_apply_to),
+                    value = stringResource(
+                        when (wpTarget) {
+                            WallpaperTarget.HOME -> R.string.wp_target_home
+                            WallpaperTarget.LOCK -> R.string.wp_target_lock
+                            WallpaperTarget.BOTH -> R.string.wp_target_both
+                        }
+                    ),
+                    onClick = { showTargetDialog = true },
                 )
             }
             item {
-                AviateRow(Icons.Filled.Autorenew, "Rotate now",
-                    onClick = { wallpaperRotator.rotateNow() })
+                AviateRow(
+                    Icons.Filled.Shuffle,
+                    stringResource(R.string.wp_shuffle),
+                ) {
+                    Switch(
+                        checked = wpShuffle,
+                        onCheckedChange = {
+                            scope.launch { settings.setWallpaperShuffle(it) }
+                        },
+                    )
+                }
+            }
+            item {
+                AviateRow(
+                    Icons.Filled.Autorenew,
+                    stringResource(R.string.wp_rotate_now),
+                    onClick = { wallpaperRotator.rotateNow() },
+                )
             }
 
             item { SectionBand("Spaces") }
@@ -335,29 +442,214 @@ fun SettingsScreen(
         ) { showIconPackDialog = false }
     }
 
-    if (showIntervalDialog) {
+    if (showScheduleDialog) {
         AlertDialog(
-            onDismissRequest = { showIntervalDialog = false },
-            title = { Text("Rotation interval") },
+            onDismissRequest = { showScheduleDialog = false },
+            title = { Text(stringResource(R.string.wp_schedule)) },
             text = {
-                Column {
-                    WallpaperInterval.entries.forEach { interval ->
-                        RadioOption(
-                            label = interval.label,
-                            selected = wpInterval == interval.minutes,
-                        ) {
-                            scope.launch {
-                                settings.setWallpaperInterval(interval.minutes)
-                                wallpaperRotator.reschedule()
+                Column(
+                    Modifier.verticalScroll(rememberScrollState())
+                ) {
+                    Row {
+                        FilterChip(
+                            selected = wpSchedule.mode ==
+                                WallpaperScheduleMode.INTERVAL,
+                            onClick = {
+                                updateSchedule(
+                                    wpSchedule.copy(
+                                        mode = WallpaperScheduleMode.INTERVAL,
+                                    ),
+                                )
+                            },
+                            label = {
+                                Text(stringResource(R.string.wp_mode_interval))
+                            },
+                            modifier = Modifier.padding(end = 8.dp),
+                        )
+                        FilterChip(
+                            selected = wpSchedule.mode ==
+                                WallpaperScheduleMode.TIMES,
+                            onClick = {
+                                updateSchedule(
+                                    wpSchedule.copy(
+                                        mode = WallpaperScheduleMode.TIMES,
+                                    ),
+                                )
+                            },
+                            label = {
+                                Text(stringResource(R.string.wp_mode_times))
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    when (wpSchedule.mode) {
+                        WallpaperScheduleMode.INTERVAL -> {
+                            WALLPAPER_INTERVAL_PRESETS.forEach { minutes ->
+                                RadioOption(
+                                    label = intervalLabel(minutes),
+                                    selected =
+                                        wpSchedule.intervalMinutes == minutes,
+                                ) {
+                                    val today =
+                                        java.time.LocalDate.now().toEpochDay()
+                                    updateSchedule(
+                                        wpSchedule.copy(
+                                            intervalMinutes = minutes,
+                                            anchorEpochDay =
+                                                if (minutes >= 1440) today
+                                                else wpSchedule.anchorEpochDay,
+                                        ),
+                                    )
+                                }
                             }
-                            showIntervalDialog = false
+                            Spacer(Modifier.height(4.dp))
+                            TextButton(onClick = { pickStartTime = true }) {
+                                Text(
+                                    stringResource(
+                                        R.string.wp_starting_at,
+                                        fmtTime(wpSchedule.startMinute),
+                                    ),
+                                )
+                            }
+                        }
+                        WallpaperScheduleMode.TIMES -> {
+                            wpSchedule.times.forEach { t ->
+                                Row(
+                                    verticalAlignment =
+                                        Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text(
+                                        fmtTime(t),
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    IconButton(onClick = {
+                                        updateSchedule(
+                                            wpSchedule.copy(
+                                                times = wpSchedule.times - t,
+                                            ),
+                                        )
+                                    }) {
+                                        Icon(
+                                            Icons.Filled.Close,
+                                            contentDescription =
+                                                stringResource(R.string.cancel),
+                                        )
+                                    }
+                                }
+                            }
+                            TextButton(onClick = { pickExtraTime = true }) {
+                                Text(stringResource(R.string.wp_add_time))
+                            }
                         }
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showIntervalDialog = false }) { Text("Close") }
+                TextButton(onClick = { showScheduleDialog = false }) {
+                    Text(stringResource(R.string.spaces_close))
+                }
             },
+        )
+    }
+
+    if (pickStartTime) {
+        TimePickDialog(
+            initial = wpSchedule.startMinute,
+            onPick = { m ->
+                updateSchedule(wpSchedule.copy(startMinute = m))
+                pickStartTime = false
+            },
+            onDismiss = { pickStartTime = false },
+        )
+    }
+
+    if (pickExtraTime) {
+        TimePickDialog(
+            initial = 7 * 60,
+            onPick = { m ->
+                updateSchedule(
+                    wpSchedule.copy(
+                        times = (wpSchedule.times + m).distinct().sorted(),
+                    ),
+                )
+                pickExtraTime = false
+            },
+            onDismiss = { pickExtraTime = false },
+        )
+    }
+
+    if (showTargetDialog) {
+        AlertDialog(
+            onDismissRequest = { showTargetDialog = false },
+            title = { Text(stringResource(R.string.wp_apply_to)) },
+            text = {
+                Column {
+                    WallpaperTarget.entries.forEach { t ->
+                        RadioOption(
+                            label = stringResource(
+                                when (t) {
+                                    WallpaperTarget.HOME ->
+                                        R.string.wp_target_home
+                                    WallpaperTarget.LOCK ->
+                                        R.string.wp_target_lock
+                                    WallpaperTarget.BOTH ->
+                                        R.string.wp_target_both
+                                }
+                            ),
+                            selected = wpTarget == t,
+                        ) {
+                            scope.launch {
+                                settings.setWallpaperTarget(t)
+                            }
+                            showTargetDialog = false
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showTargetDialog = false }) {
+                    Text(stringResource(R.string.spaces_close))
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun intervalLabel(minutes: Int): String = when {
+    minutes < 60 -> androidx.compose.ui.res.pluralStringResource(
+        R.plurals.wp_interval_minutes, minutes, minutes,
+    )
+    minutes < 1440 -> androidx.compose.ui.res.pluralStringResource(
+        R.plurals.wp_interval_hours, minutes / 60, minutes / 60,
+    )
+    else -> androidx.compose.ui.res.pluralStringResource(
+        R.plurals.wp_interval_days, minutes / 1440, minutes / 1440,
+    )
+}
+
+@Composable
+private fun wallpaperScheduleSummary(s: WallpaperSchedule): String {
+    fun fmt(m: Int) = String.format("%02d:%02d", m / 60, m % 60)
+    return when (s.mode) {
+        WallpaperScheduleMode.INTERVAL ->
+            if (s.intervalMinutes < 1440) {
+                stringResource(
+                    R.string.wp_every_interval,
+                    intervalLabel(s.intervalMinutes),
+                    fmt(s.startMinute),
+                )
+            } else {
+                stringResource(
+                    R.string.wp_every_days_at,
+                    intervalLabel(s.intervalMinutes),
+                    fmt(s.startMinute),
+                )
+            }
+        WallpaperScheduleMode.TIMES -> stringResource(
+            R.string.wp_daily_at,
+            s.times.joinToString(", ") { fmt(it) },
         )
     }
 }

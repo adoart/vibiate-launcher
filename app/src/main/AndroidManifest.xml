@@ -11,6 +11,7 @@
     <uses-permission android:name="android.permission.BLUETOOTH"
         android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <application
         android:name=".VibiateApplication"
@@ -51,5 +52,10 @@
                 <data android:scheme="package" />
             </intent-filter>
         </receiver>
+
+        <!-- AlarmManager wake-up for scheduled wallpaper rotations. -->
+        <receiver
+            android:name=".data.WallpaperAlarmReceiver"
+            android:exported="false" />
     </application>
 </manifest>

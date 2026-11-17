@@ -1,17 +1,21 @@
 package com.vibiate.launcher.data
 
+import android.app.AlarmManager
+import android.app.PendingIntent
 import android.app.WallpaperManager
 import android.content.Context
+import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Build
 import android.widget.Toast
-import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.vibiate.launcher.R
-import java.util.concurrent.TimeUnit
+import java.time.LocalDateTime
+import java.time.ZoneId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -20,14 +24,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Schedules/cancels the periodic wallpaper rotation worker. A no-op schedule when
- * the user has not picked any images.
+ * Schedules wallpaper rotations via AlarmManager (WorkManager's 15-minute
+ * granularity can't hit clock times) and applies one-shot images.
  */
 class WallpaperRotator(
     private val context: Context,
     private val settings: SettingsRepository,
 ) {
     private val workManager get() = WorkManager.getInstance(context)
+    private val alarmManager get() =
+        context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
     // App-lifetime scope: a picked single wallpaper is applied even though
     // the sheet that launched the picker is gone by then.
@@ -59,28 +65,55 @@ class WallpaperRotator(
         }
     }
 
-    /** Reschedule based on current settings. Call after enabling or changing interval/URIs. */
+    private fun alarmIntent(): PendingIntent = PendingIntent.getBroadcast(
+        context,
+        0,
+        Intent(context, WallpaperAlarmReceiver::class.java),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
+    /**
+     * Recompute the next due time and (re)arm the alarm. Cancels everything
+     * when rotation is disabled, the list is empty, or the schedule has no
+     * future slot. Always cleans up the legacy WorkManager periodic job.
+     */
     suspend fun reschedule() {
+        // Legacy cleanup from the WorkManager-based implementation.
+        workManager.cancelUniqueWork(PERIODIC_WORK)
+
         val enabled = settings.wallpaperEnabled.first()
-        val uris = settings.wallpaperUris.first()
-        val interval = settings.wallpaperIntervalMinutes.first()
-        if (!enabled || uris.isEmpty()) {
-            workManager.cancelUniqueWork(PERIODIC_WORK)
+        val images = settings.wallpaperImages.first()
+        val schedule = settings.wallpaperSchedule.first()
+        val next = if (enabled && images.isNotEmpty()) {
+            nextRotation(schedule, LocalDateTime.now())
+        } else {
+            null
+        }
+        if (next == null) {
+            alarmManager.cancel(alarmIntent())
+            settings.setWallpaperNextDue(null)
             return
         }
-        val request = PeriodicWorkRequestBuilder<WallpaperRotateWorker>(interval, TimeUnit.MINUTES)
-            .build()
-        workManager.enqueueUniquePeriodicWork(
-            PERIODIC_WORK,
-            ExistingPeriodicWorkPolicy.UPDATE,
-            request,
-        )
+        val epochMs = next.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        settings.setWallpaperNextDue(epochMs)
+        val pi = alarmIntent()
+        if (
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            alarmManager.canScheduleExactAlarms()
+        ) {
+            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, epochMs, pi)
+        } else {
+            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, epochMs, pi)
+        }
     }
 
     suspend fun cancel() {
         workManager.cancelUniqueWork(PERIODIC_WORK)
+        alarmManager.cancel(alarmIntent())
+        settings.setWallpaperNextDue(null)
     }
 
+    /** Rotate to the next image now (worker reschedules afterwards). */
     fun rotateNow() {
         workManager.enqueueUniqueWork(
             ONE_SHOT_WORK,
@@ -89,18 +122,36 @@ class WallpaperRotator(
         )
     }
 
+    /** Set a specific rotation image as the wallpaper now. */
+    fun setNow(uri: String) {
+        workManager.enqueueUniqueWork(
+            ONE_SHOT_WORK,
+            ExistingWorkPolicy.REPLACE,
+            OneTimeWorkRequestBuilder<WallpaperRotateWorker>()
+                .setInputData(
+                    Data.Builder()
+                        .putString(WallpaperRotateWorker.KEY_URI, uri)
+                        .build(),
+                )
+                .build(),
+        )
+    }
+
     /**
-     * One-shot wallpaper set from a just-picked URI, independent of the rotation
-     * list. Decodes on IO and applies via WallpaperManager; returns success.
+     * Called from MainActivity.onStart: if a scheduled rotation was missed
+     * (process death, missed alarm) fire it now; otherwise just re-arm —
+     * covers reboots and exact-alarm permission changes.
      */
-    suspend fun setOnce(uri: Uri): Boolean = withContext(Dispatchers.IO) {
-        runCatching {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                val bitmap = BitmapFactory.decodeStream(stream) ?: return@use false
-                WallpaperManager.getInstance(context).setBitmap(bitmap)
-                true
-            } ?: false
-        }.getOrDefault(false)
+    suspend fun onLauncherStarted() {
+        val due = settings.wallpaperNextDue.first()
+        if (
+            settings.wallpaperEnabled.first() && due != null &&
+            System.currentTimeMillis() >= due
+        ) {
+            rotateNow()
+        } else {
+            reschedule()
+        }
     }
 
     companion object {

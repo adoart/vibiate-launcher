@@ -309,5 +309,53 @@
     <string name="spaces_bt_hint">Switch here when one connects. It won’t count as headphones.</string>
     <string name="space_reason_bt">Bluetooth device connected</string>
     <string name="space_reason_bt_one">Connected to %1$s</string>
+
+    <!-- Wallpaper rotation -->
+    <string name="wp_section">Wallpaper rotation</string>
+    <string name="wp_enabled">Enabled</string>
+    <string name="wp_images">Images</string>
+    <string name="wp_images_none">None</string>
+    <plurals name="wp_images_count">
+        <item quantity="one">%d image</item>
+        <item quantity="other">%d images</item>
+    </plurals>
+    <string name="wp_schedule">Schedule</string>
+    <string name="wp_mode_interval">Interval</string>
+    <string name="wp_mode_times">Times of day</string>
+    <string name="wp_starting_at">Starting at %1$s</string>
+    <string name="wp_add_time">Add time</string>
+    <plurals name="wp_interval_minutes">
+        <item quantity="one">%d minute</item>
+        <item quantity="other">%d minutes</item>
+    </plurals>
+    <plurals name="wp_interval_hours">
+        <item quantity="one">%d hour</item>
+        <item quantity="other">%d hours</item>
+    </plurals>
+    <plurals name="wp_interval_days">
+        <item quantity="one">%d day</item>
+        <item quantity="other">%d days</item>
+    </plurals>
+    <string name="wp_every_interval">Every %1$s from %2$s</string>
+    <string name="wp_every_days_at">Every %1$s at %2$s</string>
+    <string name="wp_daily_at">Daily at %1$s</string>
+    <string name="wp_exact_timing">Exact timing</string>
+    <string name="wp_exact_on">On</string>
+    <string name="wp_exact_off">Off — tap to allow</string>
+    <string name="wp_apply_to">Apply to</string>
+    <string name="wp_target_home">Home screen</string>
+    <string name="wp_target_lock">Lock screen</string>
+    <string name="wp_target_both">Home and lock screens</string>
+    <string name="wp_shuffle">Shuffle</string>
+    <string name="wp_rotate_now">Rotate now</string>
+    <string name="wp_manager_title">WALLPAPER IMAGES</string>
+    <string name="wp_add_images">Add images</string>
+    <string name="wp_empty">No images yet. Add some to start rotating.</string>
+    <string name="wp_now_showing">Now showing</string>
+    <string name="wp_remove_image">Remove image</string>
+    <string name="wp_reset">Reset</string>
+    <string name="wp_set_now">Set as wallpaper now</string>
+    <string name="wp_save">Save</string>
+    <string name="wp_set_toast">Wallpaper set</string>
 </resources>
 

@@ -1126,7 +1126,7 @@ fun SpacesSettingsScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TimePickDialog(
+internal fun TimePickDialog(
     initial: Int,
     onPick: (Int) -> Unit,
     onDismiss: () -> Unit,

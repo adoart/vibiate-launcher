@@ -213,15 +213,4 @@ data class CustomScreen(
     }
 }
 
-enum class WallpaperInterval(val minutes: Long, val label: String) {
-    M15(15, "15 minutes"),
-    H1(60, "1 hour"),
-    H6(360, "6 hours"),
-    H12(720, "12 hours"),
-    H24(1440, "24 hours");
 
-    companion object {
-        fun fromMinutes(m: Long): WallpaperInterval =
-            entries.firstOrNull { it.minutes == m } ?: H24
-    }
-}
