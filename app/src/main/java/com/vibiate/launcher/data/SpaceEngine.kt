@@ -131,8 +131,23 @@ class SpaceEngine(
     private var a2dpProxy: BluetoothA2dp? = null
     private var headsetProxy: BluetoothHeadset? = null
 
+    /** Profiles with an in-flight getProfileProxy bind (main thread only). */
+    private val btProxyPending = mutableSetOf<Int>()
+
     private val profileListener = object : BluetoothProfile.ServiceListener {
         override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
+            btProxyPending.remove(profile)
+            val alreadyBound = when (profile) {
+                BluetoothProfile.A2DP -> a2dpProxy != null
+                BluetoothProfile.HEADSET -> headsetProxy != null
+                else -> true
+            }
+            if (alreadyBound) {
+                // Duplicate bind (e.g. a timeout raced the real callback):
+                // close the extra proxy rather than leak it.
+                runCatching { btAdapter?.closeProfileProxy(profile, proxy) }
+                return
+            }
             when (profile) {
                 BluetoothProfile.A2DP -> a2dpProxy = proxy as BluetoothA2dp
                 BluetoothProfile.HEADSET -> headsetProxy = proxy as BluetoothHeadset
@@ -145,6 +160,7 @@ class SpaceEngine(
                 BluetoothProfile.A2DP -> a2dpProxy = null
                 BluetoothProfile.HEADSET -> headsetProxy = null
             }
+            btProxyPending.remove(profile)
             refreshBt()
         }
     }
@@ -183,8 +199,11 @@ class SpaceEngine(
                 delay(60_000L - (System.currentTimeMillis() % 60_000L) + 250L)
                 if (!started.get()) break
                 now.value = LocalDateTime.now()
-                refreshCarMode()
-                refreshBt()
+                // BT state lives on the main thread; this loop doesn't.
+                mainHandler.post {
+                    refreshCarMode()
+                    refreshBt()
+                }
             }
         }
         scope.launch { fetchCurrentLocationOnce() }
@@ -197,7 +216,10 @@ class SpaceEngine(
         runCatching { context.unregisterReceiver(btReceiver) }
         runCatching { locationManager.removeUpdates(locationListener) }
         locationUpdatesOn = false
-        closeBtProxies()
+        // Keep the BT profile proxies bound: rebinding is async, and an
+        // empty connectedBt in between would flap the resolution (and with
+        // it an activation launch) when the activity comes back.
+        btReceiverRegistered = false
     }
 
     /**
@@ -274,21 +296,20 @@ class SpaceEngine(
 
     @SuppressLint("MissingPermission")
     private fun refreshBt() {
+        // Profile callbacks can arrive after stop(): no signal changes or
+        // receiver (re)registration while the launcher is in the background.
+        if (!started.get()) return
         if (!hasBtPermission()) {
             connectedBt.value = emptySet()
             return
         }
         val adapter = btAdapter ?: return
-        if (a2dpProxy == null) {
-            runCatching {
-                adapter.getProfileProxy(context, profileListener, BluetoothProfile.A2DP)
-            }
+        if (!adapter.isEnabled) {
+            connectedBt.value = emptySet()
+            return
         }
-        if (headsetProxy == null) {
-            runCatching {
-                adapter.getProfileProxy(context, profileListener, BluetoothProfile.HEADSET)
-            }
-        }
+        bindProxyIfNeeded(adapter, BluetoothProfile.A2DP)
+        bindProxyIfNeeded(adapter, BluetoothProfile.HEADSET)
         if (!btReceiverRegistered) {
             btReceiverRegistered = true
             runCatching {
@@ -316,20 +337,30 @@ class SpaceEngine(
             connected += headsetProxy?.connectedDevices
                 ?.map { it.address.uppercase() }.orEmpty()
         }
+        // A bind still in flight would report a transient empty set and flap
+        // the resolution — keep the last value until every bind resolves.
+        if (btProxyPending.isNotEmpty()) return
         connectedBt.value = connected
     }
 
-    private fun closeBtProxies() {
-        val adapter = btAdapter ?: return
-        a2dpProxy?.let {
-            runCatching { adapter.closeProfileProxy(BluetoothProfile.A2DP, it) }
+    /** Async proxy bind, tracked so its empty gap never reaches signals. */
+    @SuppressLint("MissingPermission")
+    private fun bindProxyIfNeeded(adapter: BluetoothAdapter, profile: Int) {
+        val bound = when (profile) {
+            BluetoothProfile.A2DP -> a2dpProxy != null
+            BluetoothProfile.HEADSET -> headsetProxy != null
+            else -> true
         }
-        headsetProxy?.let {
-            runCatching { adapter.closeProfileProxy(BluetoothProfile.HEADSET, it) }
+        if (bound || profile in btProxyPending) return
+        val requested = runCatching {
+            adapter.getProfileProxy(context, profileListener, profile)
+        }.getOrDefault(false)
+        if (requested) {
+            btProxyPending += profile
+            mainHandler.postDelayed({
+                if (btProxyPending.remove(profile)) refreshBt()
+            }, 3_000L)
         }
-        a2dpProxy = null
-        headsetProxy = null
-        btReceiverRegistered = false
     }
 
     /** Paired devices for the settings checklist: (address, name). */
@@ -476,9 +507,7 @@ class SpaceEngine(
                 val prev = _resolution.value
                 _resolution.value = res
                 if (res.manualStale) settings.setSpaceManual(null)
-                if (prev != null && prev.spaceId != res.spaceId &&
-                    !res.manual && signalsChanged
-                ) {
+                if (shouldActivate(prev, res, signalsChanged, started.get())) {
                     spaces.firstOrNull { it.id == res.spaceId }?.let {
                         _pendingActivation.value = it
                     }

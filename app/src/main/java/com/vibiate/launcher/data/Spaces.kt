@@ -441,3 +441,13 @@ fun defaultSpaceApps(spaceId: Int, apps: List<AppEntry>): List<String> {
         .take(8)
         .map { it.componentKey }
 }
+
+/** Whether a resolution change should run the new space's on-activate actions. */
+fun shouldActivate(
+    prev: SpaceResolution?,
+    res: SpaceResolution,
+    signalsChanged: Boolean,
+    engineStarted: Boolean,
+): Boolean =
+    prev != null && prev.spaceId != res.spaceId && !res.manual &&
+        signalsChanged && engineStarted

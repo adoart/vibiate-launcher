@@ -401,3 +401,45 @@ class SpacesTest {
         assertEquals(1, out[2].btDevices.size) // deduped
     }
 }
+
+class ShouldActivateTest {
+
+    private fun res(id: Int, manual: Boolean = false) = SpaceResolution(
+        spaceId = id,
+        autoId = id,
+        manual = manual,
+        reasons = emptyList(),
+        manualStale = false,
+    )
+
+    @Test
+    fun `signal driven change while started activates`() {
+        assertTrue(
+            shouldActivate(res(1), res(3), signalsChanged = true, engineStarted = true),
+        )
+    }
+
+    @Test
+    fun `no activation when blocked`() {
+        // First resolution (no previous) never activates.
+        assertFalse(
+            shouldActivate(null, res(3), signalsChanged = true, engineStarted = true),
+        )
+        // Same space id is not a change.
+        assertFalse(
+            shouldActivate(res(3), res(3), signalsChanged = true, engineStarted = true),
+        )
+        // Manual picks never run activate actions.
+        assertFalse(
+            shouldActivate(res(1), res(3, manual = true), signalsChanged = true, engineStarted = true),
+        )
+        // Settings edits / cold combines don't activate.
+        assertFalse(
+            shouldActivate(res(1), res(3), signalsChanged = false, engineStarted = true),
+        )
+        // A stopped engine (activity in background) must not launch apps.
+        assertFalse(
+            shouldActivate(res(1), res(3), signalsChanged = true, engineStarted = false),
+        )
+    }
+}
