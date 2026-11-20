@@ -179,6 +179,7 @@ fun SpacesScreen(
     editBlur: Float,
     onEditingChange: (Boolean) -> Unit,
     exitEditRequest: Int,
+    onSwipeUp: (() -> Unit)? = null,
 ) {
     val effective = resolution?.spaceId ?: spaces.firstOrNull()?.id ?: return
     val space = spaces.firstOrNull { it.id == effective }
@@ -194,6 +195,7 @@ fun SpacesScreen(
             editBlur = editBlur,
             onEditingChange = onEditingChange,
             exitEditRequest = exitEditRequest,
+            onSwipeUp = onSwipeUp,
             header = {
                 val aviate = LocalAviateColors.current
                 val textShadow: Shadow? = if (LocalIsDark.current) {

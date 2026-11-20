@@ -291,6 +291,11 @@ fun LauncherRoot(
             ?.let { runCatching { launch(it) } }
     }
 
+    // Swipe up on a wallpaper page (Home, Widgets, Spaces, custom screens).
+    val openAllApps: () -> Unit = {
+        scope.launch { pagerState.animateScrollToPage(LauncherTab.ALL_APPS.ordinal) }
+    }
+
     // Emitted once per Collections-search-bar tap, after the pager settles on
     // ALL_APPS; the A–Z screen focuses its field on each emission.
     val azSearchFocus = remember { MutableSharedFlow<Unit>(extraBufferCapacity = 1) }
@@ -542,6 +547,7 @@ fun LauncherRoot(
                                             widgetEditingByPage[page] = it
                                         },
                                         exitEditRequest = exitEditRequest,
+                                        onSwipeUp = openAllApps,
                                     )
                                     LauncherTab.HOME -> HomeScreen(
                                         settings = settings,
@@ -561,6 +567,7 @@ fun LauncherRoot(
                                             widgetEditingByPage[page] = it
                                         },
                                         exitEditRequest = exitEditRequest,
+                                        onSwipeUp = openAllApps,
                                     )
                                     LauncherTab.WIDGETS -> WidgetsScreen(
                                         controller = widgetController,
@@ -580,6 +587,7 @@ fun LauncherRoot(
                                             widgetEditingByPage[page] = it
                                         },
                                         exitEditRequest = exitEditRequest,
+                                        onSwipeUp = openAllApps,
                                     )
                                     LauncherTab.COLLECTIONS -> CollectionsScreen(
                                         repository = appRepository,
@@ -628,6 +636,7 @@ fun LauncherRoot(
                                             widgetEditingByPage[page] = it
                                         },
                                         exitEditRequest = exitEditRequest,
+                                        onSwipeUp = openAllApps,
                                         onRemoveScreen = {
                                             widgetController.removeScreen(screen.id)
                                         },

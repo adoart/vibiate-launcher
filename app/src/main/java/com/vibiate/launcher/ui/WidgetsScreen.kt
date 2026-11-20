@@ -65,8 +65,12 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -156,6 +160,8 @@ fun WidgetsScreen(
     onEditingChange: (Boolean) -> Unit = {},
     /** Bump from LauncherRoot when a dock/top-bar tap should exit edit. */
     exitEditRequest: Int = 0,
+    /** Swiping up past the bottom of the page (to the A–Z list). */
+    onSwipeUp: (() -> Unit)? = null,
 ) {
     val allWidgets by controller.widgets.collectAsState()
     val widgets = allWidgets.filter { it.screenId == screenId }
@@ -253,9 +259,75 @@ fun WidgetsScreen(
         exitEdit()
     }
 
+    // Swipe-up past the bottom jumps to the A–Z list. The connection wraps
+    // the column's own scroll, so it only sees the upward drag the content
+    // couldn't consume. It accumulates that overscroll and fires once per
+    // gesture at 48dp, or early on a fast fling (16dp + 1000dp/s).
+    val swipeBlocked = pageEditing || drag.isDragging
+    val blockedNow by rememberUpdatedState(swipeBlocked)
+    val swipeUpNow by rememberUpdatedState(onSwipeUp)
+    val swipeTriggerPx = with(density) { 48.dp.toPx() }
+    val flingAccumPx = with(density) { 16.dp.toPx() }
+    val flingVelocityPx = with(density) { 1000.dp.toPx() }
+    val swipeUpConnection = remember {
+        object : NestedScrollConnection {
+            var upward = 0f
+            var fired = false
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                if (source != NestedScrollSource.UserInput || blockedNow) {
+                    return Offset.Zero
+                }
+                if (available.y < 0f) {
+                    upward += -available.y
+                    if (!fired && upward >= swipeTriggerPx) {
+                        fired = true
+                        swipeUpNow?.invoke()
+                    }
+                    // Absorb the leftover upward delta so the bottom stretch
+                    // overscroll doesn't fight the navigation gesture.
+                    return Offset(0f, available.y)
+                }
+                if (available.y > 0f || consumed.y > 0f) upward = 0f
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (!fired && !blockedNow &&
+                    upward >= flingAccumPx &&
+                    available.y < -flingVelocityPx
+                ) {
+                    fired = true
+                    swipeUpNow?.invoke()
+                }
+                return Velocity.Zero
+            }
+
+            override suspend fun onPostFling(
+                consumed: Velocity,
+                available: Velocity,
+            ): Velocity {
+                fired = false
+                upward = 0f
+                return Velocity.Zero
+            }
+        }
+    }
+
     Column(
         Modifier
             .fillMaxSize()
+            .then(
+                if (onSwipeUp != null) {
+                    Modifier.nestedScroll(swipeUpConnection)
+                } else {
+                    Modifier
+                },
+            )
             .verticalScroll(scroll)
             .onGloballyPositioned {
                 viewportTop = (it.positionInWindow() + windowOrigin).y

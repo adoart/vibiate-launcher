@@ -39,6 +39,7 @@ fun HomeScreen(
     editBlur: Float = 0f,
     onEditingChange: (Boolean) -> Unit = {},
     exitEditRequest: Int = 0,
+    onSwipeUp: (() -> Unit)? = null,
 ) {
     val homeWidgets by controller.widgets.collectAsState()
     val homeShortcuts by controller.shortcuts.collectAsState()
@@ -60,6 +61,7 @@ fun HomeScreen(
             editBlur = editBlur,
             onEditingChange = onEditingChange,
             exitEditRequest = exitEditRequest,
+            onSwipeUp = onSwipeUp,
         )
         if (!hasWidgets) {
             Text(
